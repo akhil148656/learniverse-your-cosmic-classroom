@@ -5,6 +5,15 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
+import StudentLogin from "./pages/auth/StudentLogin";
+import TeacherLogin from "./pages/auth/TeacherLogin";
+import ParentLogin from "./pages/auth/ParentLogin";
+import StudentOnboarding from "./pages/student/StudentOnboarding";
+import StudentDashboard from "./pages/student/StudentDashboard";
+import StudentSearch from "./pages/student/StudentSearch";
+import { StudentAssignments, StudentQuizzes, StudentVirtualLabs, StudentDiscussions, StudentAIMentor } from "./pages/student/StudentPages";
+import { TeacherDashboard, TeacherClasses, TeacherStudents, TeacherAssignments, TeacherAnalytics, TeacherFeedback } from "./pages/teacher/TeacherPages";
+import { ParentDashboard, ParentChildProgress, ParentAIFeedback, ParentAlerts } from "./pages/parent/ParentPages";
 
 const queryClient = new QueryClient();
 
@@ -16,7 +25,31 @@ const App = () => (
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Index />} />
-          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+          {/* Auth Routes */}
+          <Route path="/student-login" element={<StudentLogin />} />
+          <Route path="/teacher-login" element={<TeacherLogin />} />
+          <Route path="/parent-login" element={<ParentLogin />} />
+          {/* Student Routes */}
+          <Route path="/student/onboarding" element={<StudentOnboarding />} />
+          <Route path="/student/dashboard" element={<StudentDashboard />} />
+          <Route path="/student/search" element={<StudentSearch />} />
+          <Route path="/student/assignments" element={<StudentAssignments />} />
+          <Route path="/student/quizzes" element={<StudentQuizzes />} />
+          <Route path="/student/virtual-labs" element={<StudentVirtualLabs />} />
+          <Route path="/student/discussions" element={<StudentDiscussions />} />
+          <Route path="/student/ai-mentor" element={<StudentAIMentor />} />
+          {/* Teacher Routes */}
+          <Route path="/teacher/dashboard" element={<TeacherDashboard />} />
+          <Route path="/teacher/classes" element={<TeacherClasses />} />
+          <Route path="/teacher/students" element={<TeacherStudents />} />
+          <Route path="/teacher/assignments" element={<TeacherAssignments />} />
+          <Route path="/teacher/analytics" element={<TeacherAnalytics />} />
+          <Route path="/teacher/feedback" element={<TeacherFeedback />} />
+          {/* Parent Routes */}
+          <Route path="/parent/dashboard" element={<ParentDashboard />} />
+          <Route path="/parent/child-progress" element={<ParentChildProgress />} />
+          <Route path="/parent/ai-feedback" element={<ParentAIFeedback />} />
+          <Route path="/parent/alerts" element={<ParentAlerts />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
