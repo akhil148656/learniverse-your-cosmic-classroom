@@ -1,0 +1,67 @@
+import { ReactNode, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { SidebarProvider } from "@/components/ui/sidebar";
+import { AppSidebar } from "./AppSidebar";
+import { TopBar } from "./TopBar";
+import { StarField } from "@/components/ui/StarField";
+import { supabase } from "@/integrations/supabase/client";
+
+interface PortalLayoutProps {
+  children: ReactNode;
+  role: "student" | "teacher" | "parent";
+}
+
+export function PortalLayout({ children, role }: PortalLayoutProps) {
+  const navigate = useNavigate();
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const checkAuth = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        navigate(`/${role}-login`);
+        return;
+      }
+      setIsLoading(false);
+    };
+
+    checkAuth();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!session) {
+        navigate(`/${role}-login`);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, [navigate, role]);
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <StarField />
+        <div className="relative z-10 flex flex-col items-center gap-4">
+          <div className="w-16 h-16 rounded-xl bg-gradient-cosmic animate-pulse-glow flex items-center justify-center">
+            <span className="text-foreground font-display font-bold text-2xl">L</span>
+          </div>
+          <p className="text-muted-foreground font-display">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <SidebarProvider>
+      <div className="min-h-screen flex w-full bg-background relative">
+        <StarField />
+        <AppSidebar role={role} />
+        <div className="flex-1 flex flex-col relative z-10">
+          <TopBar role={role} />
+          <main className="flex-1 p-6 overflow-auto">
+            {children}
+          </main>
+        </div>
+      </div>
+    </SidebarProvider>
+  );
+}
