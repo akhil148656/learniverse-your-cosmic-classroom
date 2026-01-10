@@ -1,1 +1,7 @@
 project_id = "jkpczjzoydvqheswrklv"
+
+[functions.ai-mentor]
+verify_jwt = false
+
+[functions.youtube-search]
+verify_jwt = false
