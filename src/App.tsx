@@ -11,8 +11,13 @@ import ParentLogin from "./pages/auth/ParentLogin";
 import StudentOnboarding from "./pages/student/StudentOnboarding";
 import StudentDashboard from "./pages/student/StudentDashboard";
 import StudentSearch from "./pages/student/StudentSearch";
-import { StudentAssignments, StudentQuizzes, StudentVirtualLabs, StudentDiscussions, StudentAIMentor } from "./pages/student/StudentPages";
-import { TeacherDashboard, TeacherClasses, TeacherStudents, TeacherAssignments, TeacherAnalytics, TeacherFeedback } from "./pages/teacher/TeacherPages";
+import StudentVirtualLabs from "./pages/student/StudentVirtualLabs";
+import StudentAIMentor from "./pages/student/StudentAIMentor";
+import StudentDiscussions from "./pages/student/StudentDiscussions";
+import { StudentAssignments, StudentQuizzes } from "./pages/student/StudentPages";
+import TeacherClasses from "./pages/teacher/TeacherClasses";
+import TeacherStudents from "./pages/teacher/TeacherStudents";
+import { TeacherDashboard, TeacherAssignments, TeacherAnalytics, TeacherFeedback } from "./pages/teacher/TeacherPages";
 import { ParentDashboard, ParentChildProgress, ParentAIFeedback, ParentAlerts } from "./pages/parent/ParentPages";
 
 const queryClient = new QueryClient();
@@ -25,11 +30,9 @@ const App = () => (
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Index />} />
-          {/* Auth Routes */}
           <Route path="/student-login" element={<StudentLogin />} />
           <Route path="/teacher-login" element={<TeacherLogin />} />
           <Route path="/parent-login" element={<ParentLogin />} />
-          {/* Student Routes */}
           <Route path="/student/onboarding" element={<StudentOnboarding />} />
           <Route path="/student/dashboard" element={<StudentDashboard />} />
           <Route path="/student/search" element={<StudentSearch />} />
@@ -38,14 +41,12 @@ const App = () => (
           <Route path="/student/virtual-labs" element={<StudentVirtualLabs />} />
           <Route path="/student/discussions" element={<StudentDiscussions />} />
           <Route path="/student/ai-mentor" element={<StudentAIMentor />} />
-          {/* Teacher Routes */}
           <Route path="/teacher/dashboard" element={<TeacherDashboard />} />
           <Route path="/teacher/classes" element={<TeacherClasses />} />
           <Route path="/teacher/students" element={<TeacherStudents />} />
           <Route path="/teacher/assignments" element={<TeacherAssignments />} />
           <Route path="/teacher/analytics" element={<TeacherAnalytics />} />
           <Route path="/teacher/feedback" element={<TeacherFeedback />} />
-          {/* Parent Routes */}
           <Route path="/parent/dashboard" element={<ParentDashboard />} />
           <Route path="/parent/child-progress" element={<ParentChildProgress />} />
           <Route path="/parent/ai-feedback" element={<ParentAIFeedback />} />

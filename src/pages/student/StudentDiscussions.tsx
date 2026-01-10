@@ -1,0 +1,301 @@
+import { useState, useEffect, useRef } from "react";
+import { Send, Users, MessageSquare, Loader2 } from "lucide-react";
+import { PortalLayout } from "@/components/layout/PortalLayout";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { EmptyState } from "@/components/cards/EmptyState";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
+
+interface Message {
+  id: string;
+  message_text: string;
+  sender_id: string;
+  created_at: string;
+  sender_name?: string;
+}
+
+interface Room {
+  id: string;
+  name: string;
+  class_id: string | null;
+}
+
+export default function StudentDiscussions() {
+  const [rooms, setRooms] = useState<Room[]>([]);
+  const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [newMessage, setNewMessage] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSending, setIsSending] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [studentId, setStudentId] = useState<string | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const init = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      setUserId(user.id);
+
+      const { data: student } = await supabase
+        .from("students")
+        .select("id, class_id")
+        .eq("user_id", user.id)
+        .single();
+
+      if (student) {
+        setStudentId(student.id);
+        
+        // Fetch rooms for student's class
+        let query = supabase.from("discussion_rooms").select("*");
+        if (student.class_id) {
+          query = query.eq("class_id", student.class_id);
+        }
+        
+        const { data: roomsData } = await query;
+        setRooms(roomsData || []);
+      }
+      
+      setIsLoading(false);
+    };
+
+    init();
+  }, []);
+
+  useEffect(() => {
+    if (!selectedRoom) return;
+
+    const fetchMessages = async () => {
+      const { data } = await supabase
+        .from("discussion_messages")
+        .select("*")
+        .eq("room_id", selectedRoom.id)
+        .order("created_at", { ascending: true });
+
+      if (data) {
+        // Enrich with sender names
+        const enriched = await Promise.all(
+          data.map(async (msg) => {
+            const { data: profile } = await supabase
+              .from("profiles")
+              .select("full_name")
+              .eq("user_id", msg.sender_id)
+              .single();
+            return { ...msg, sender_name: profile?.full_name || "Anonymous" };
+          })
+        );
+        setMessages(enriched);
+      }
+    };
+
+    fetchMessages();
+
+    // Subscribe to new messages
+    const channel = supabase
+      .channel(`room-${selectedRoom.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "discussion_messages",
+          filter: `room_id=eq.${selectedRoom.id}`,
+        },
+        async (payload) => {
+          const newMsg = payload.new as Message;
+          const { data: profile } = await supabase
+            .from("profiles")
+            .select("full_name")
+            .eq("user_id", newMsg.sender_id)
+            .single();
+          setMessages((prev) => [...prev, { ...newMsg, sender_name: profile?.full_name || "Anonymous" }]);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [selectedRoom]);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages]);
+
+  const handleSendMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newMessage.trim() || !selectedRoom || !userId) return;
+
+    setIsSending(true);
+    const { error } = await supabase.from("discussion_messages").insert({
+      room_id: selectedRoom.id,
+      sender_id: userId,
+      message_text: newMessage,
+    });
+
+    if (error) {
+      toast.error("Failed to send message");
+    } else {
+      setNewMessage("");
+    }
+    setIsSending(false);
+  };
+
+  const createRoom = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const { data: student } = await supabase
+      .from("students")
+      .select("class_id")
+      .eq("user_id", user.id)
+      .single();
+
+    const { data, error } = await supabase
+      .from("discussion_rooms")
+      .insert({
+        name: `Study Room ${rooms.length + 1}`,
+        class_id: student?.class_id || null,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      toast.error("Failed to create room");
+    } else if (data) {
+      setRooms([...rooms, data]);
+      setSelectedRoom(data);
+      toast.success("Room created!");
+    }
+  };
+
+  return (
+    <PortalLayout role="student">
+      <div className="space-y-6">
+        <div>
+          <h1 className="font-display text-3xl font-bold text-foreground">Discussion Rooms</h1>
+          <p className="text-muted-foreground">Chat with classmates and get help</p>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+          {/* Rooms List */}
+          <Card className="bg-card border-border lg:col-span-1">
+            <CardHeader className="flex flex-row items-center justify-between pb-3">
+              <CardTitle className="font-display text-lg">Rooms</CardTitle>
+              <Button size="sm" onClick={createRoom} className="bg-primary hover:bg-primary/90">
+                + New
+              </Button>
+            </CardHeader>
+            <CardContent>
+              {isLoading ? (
+                <div className="text-center py-4 text-muted-foreground">Loading...</div>
+              ) : rooms.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">No rooms yet</p>
+              ) : (
+                <div className="space-y-2">
+                  {rooms.map((room) => (
+                    <Button
+                      key={room.id}
+                      variant={selectedRoom?.id === room.id ? "secondary" : "ghost"}
+                      className="w-full justify-start"
+                      onClick={() => setSelectedRoom(room)}
+                    >
+                      <MessageSquare className="w-4 h-4 mr-2" />
+                      {room.name}
+                    </Button>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Chat Area */}
+          <Card className="bg-card border-border lg:col-span-3 flex flex-col h-[600px]">
+            {!selectedRoom ? (
+              <CardContent className="flex-1 flex items-center justify-center">
+                <EmptyState
+                  title="Select a room"
+                  message="Choose a discussion room or create a new one"
+                  icon={Users}
+                />
+              </CardContent>
+            ) : (
+              <>
+                <CardHeader className="border-b border-border pb-4">
+                  <CardTitle className="font-display text-lg flex items-center gap-2">
+                    <MessageSquare className="w-5 h-5 text-primary" />
+                    {selectedRoom.name}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="flex-1 flex flex-col overflow-hidden p-0">
+                  <ScrollArea className="flex-1 p-4" ref={scrollRef}>
+                    <div className="space-y-4">
+                      {messages.length === 0 ? (
+                        <p className="text-center text-muted-foreground py-8">No messages yet. Start the conversation!</p>
+                      ) : (
+                        messages.map((msg) => (
+                          <div
+                            key={msg.id}
+                            className={`flex gap-3 ${msg.sender_id === userId ? "justify-end" : "justify-start"}`}
+                          >
+                            {msg.sender_id !== userId && (
+                              <Avatar className="w-8 h-8">
+                                <AvatarFallback className="bg-primary/20 text-primary text-xs">
+                                  {msg.sender_name?.charAt(0) || "?"}
+                                </AvatarFallback>
+                              </Avatar>
+                            )}
+                            <div className={`max-w-[70%] ${msg.sender_id === userId ? "text-right" : ""}`}>
+                              {msg.sender_id !== userId && (
+                                <p className="text-xs text-muted-foreground mb-1">{msg.sender_name}</p>
+                              )}
+                              <div className={`rounded-2xl px-4 py-2 ${
+                                msg.sender_id === userId
+                                  ? "bg-primary text-primary-foreground"
+                                  : "bg-muted text-foreground"
+                              }`}>
+                                <p className="text-sm">{msg.message_text}</p>
+                              </div>
+                              <p className="text-xs text-muted-foreground mt-1">
+                                {new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                              </p>
+                            </div>
+                            {msg.sender_id === userId && (
+                              <Avatar className="w-8 h-8">
+                                <AvatarFallback className="bg-secondary/20 text-secondary text-xs">
+                                  You
+                                </AvatarFallback>
+                              </Avatar>
+                            )}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </ScrollArea>
+                  <form onSubmit={handleSendMessage} className="p-4 border-t border-border flex gap-2">
+                    <Input
+                      value={newMessage}
+                      onChange={(e) => setNewMessage(e.target.value)}
+                      placeholder="Type a message..."
+                      className="flex-1 bg-muted border-border"
+                      disabled={isSending}
+                    />
+                    <Button type="submit" disabled={isSending || !newMessage.trim()} className="bg-primary hover:bg-primary/90">
+                      {isSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                    </Button>
+                  </form>
+                </CardContent>
+              </>
+            )}
+          </Card>
+        </div>
+      </div>
+    </PortalLayout>
+  );
+}
