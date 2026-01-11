@@ -14,10 +14,14 @@ import StudentSearch from "./pages/student/StudentSearch";
 import StudentVirtualLabs from "./pages/student/StudentVirtualLabs";
 import StudentAIMentor from "./pages/student/StudentAIMentor";
 import StudentDiscussions from "./pages/student/StudentDiscussions";
-import { StudentAssignments, StudentQuizzes } from "./pages/student/StudentPages";
+import StudentAssignments from "./pages/student/StudentAssignments";
+import StudentQuizzes from "./pages/student/StudentQuizzes";
 import TeacherClasses from "./pages/teacher/TeacherClasses";
 import TeacherStudents from "./pages/teacher/TeacherStudents";
-import { TeacherDashboard, TeacherAssignments, TeacherAnalytics, TeacherFeedback } from "./pages/teacher/TeacherPages";
+import TeacherAssignments from "./pages/teacher/TeacherAssignments";
+import TeacherAnalytics from "./pages/teacher/TeacherAnalytics";
+import TeacherFeedback from "./pages/teacher/TeacherFeedback";
+import { TeacherDashboard } from "./pages/teacher/TeacherPages";
 import { ParentDashboard, ParentChildProgress, ParentAIFeedback, ParentAlerts } from "./pages/parent/ParentPages";
 
 const queryClient = new QueryClient();
