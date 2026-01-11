@@ -1,0 +1,257 @@
+import { useState, useEffect } from "react";
+import { MessageSquare, RefreshCw, Users, Loader2, Send } from "lucide-react";
+import { PortalLayout } from "@/components/layout/PortalLayout";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { EmptyState } from "@/components/cards/EmptyState";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
+
+interface ClassData {
+  id: string;
+  name: string;
+}
+
+interface StudentData {
+  id: string;
+  user_id: string;
+  profile_name: string | null;
+  xp_points: number | null;
+  focus_score: number | null;
+}
+
+interface FeedbackData {
+  id: string;
+  feedback_text: string;
+  category: string | null;
+  created_at: string;
+  student_name?: string;
+}
+
+export default function TeacherFeedback() {
+  const [classes, setClasses] = useState<ClassData[]>([]);
+  const [selectedClass, setSelectedClass] = useState<string>("all");
+  const [students, setStudents] = useState<StudentData[]>([]);
+  const [feedbackList, setFeedbackList] = useState<FeedbackData[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [generatingFor, setGeneratingFor] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchClasses = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data } = await supabase
+        .from("classes")
+        .select("id, name")
+        .eq("teacher_id", user.id);
+      setClasses(data || []);
+    };
+    fetchClasses();
+  }, []);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      setIsLoading(true);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      // Fetch students
+      let studentsQuery = supabase.from("students").select("id, user_id, xp_points, focus_score, profiles!inner(full_name)");
+
+      if (selectedClass !== "all") {
+        studentsQuery = studentsQuery.eq("class_id", selectedClass);
+      } else {
+        const classIds = classes.map((c) => c.id);
+        if (classIds.length > 0) {
+          studentsQuery = studentsQuery.in("class_id", classIds);
+        }
+      }
+
+      const { data: studentsData } = await studentsQuery;
+      const formattedStudents = (studentsData || []).map((s: any) => ({
+        id: s.id,
+        user_id: s.user_id,
+        profile_name: s.profiles?.full_name || "Unknown",
+        xp_points: s.xp_points,
+        focus_score: s.focus_score,
+      }));
+      setStudents(formattedStudents);
+
+      // Fetch existing feedback
+      if (formattedStudents.length > 0) {
+        const studentIds = formattedStudents.map((s) => s.id);
+        const { data: feedbackData } = await supabase
+          .from("ai_feedback")
+          .select("*")
+          .in("student_id", studentIds)
+          .order("created_at", { ascending: false });
+
+        const enrichedFeedback = (feedbackData || []).map((f) => ({
+          ...f,
+          student_name: formattedStudents.find((s) => s.id === f.student_id)?.profile_name || "Unknown",
+        }));
+        setFeedbackList(enrichedFeedback);
+      }
+
+      setIsLoading(false);
+    };
+
+    if (classes.length > 0 || selectedClass === "all") {
+      fetchData();
+    }
+  }, [selectedClass, classes]);
+
+  const generateFeedback = async (studentId: string) => {
+    setGeneratingFor(studentId);
+    try {
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-feedback`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+        },
+        body: JSON.stringify({ studentId }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to generate feedback");
+      }
+
+      const data = await response.json();
+      toast.success("AI feedback generated successfully!");
+      
+      // Add to feedback list
+      const student = students.find((s) => s.id === studentId);
+      setFeedbackList((prev) => [
+        {
+          id: Date.now().toString(),
+          feedback_text: data.feedback,
+          category: data.category,
+          created_at: new Date().toISOString(),
+          student_name: student?.profile_name || "Unknown",
+        },
+        ...prev,
+      ]);
+    } catch (error) {
+      console.error("Error generating feedback:", error);
+      toast.error("Failed to generate feedback");
+    }
+    setGeneratingFor(null);
+  };
+
+  const getCategoryColor = (category: string | null) => {
+    switch (category) {
+      case "achievement": return "bg-accent/20 text-accent";
+      case "improvement": return "bg-destructive/20 text-destructive";
+      case "focus": return "bg-secondary/20 text-secondary";
+      default: return "bg-primary/20 text-primary";
+    }
+  };
+
+  return (
+    <PortalLayout role="teacher">
+      <div className="space-y-6">
+        <div className="flex justify-between items-center flex-wrap gap-4">
+          <div>
+            <h1 className="font-display text-3xl font-bold text-foreground">AI Feedback</h1>
+            <p className="text-muted-foreground">Generate AI-powered feedback for students and parents</p>
+          </div>
+          <Select value={selectedClass} onValueChange={setSelectedClass}>
+            <SelectTrigger className="w-[200px] bg-muted border-border">
+              <SelectValue placeholder="Select class" />
+            </SelectTrigger>
+            <SelectContent className="bg-card border-border">
+              <SelectItem value="all">All Classes</SelectItem>
+              {classes.map((c) => (
+                <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {isLoading ? (
+          <div className="text-center py-8 text-muted-foreground">Loading...</div>
+        ) : students.length === 0 ? (
+          <EmptyState
+            title="No students found"
+            message="Students will appear here once they join your classes"
+            icon={Users}
+          />
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <Card className="bg-card border-border">
+              <CardHeader>
+                <CardTitle className="font-display text-lg flex items-center gap-2">
+                  <Users className="w-5 h-5 text-primary" />
+                  Students ({students.length})
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 max-h-[500px] overflow-y-auto">
+                {students.map((student) => (
+                  <div
+                    key={student.id}
+                    className="flex items-center justify-between p-3 rounded-lg bg-muted/50 border border-border"
+                  >
+                    <div>
+                      <p className="font-medium text-foreground">{student.profile_name}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {student.xp_points || 0} XP • {student.focus_score || 100}% Focus
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => generateFeedback(student.id)}
+                      disabled={generatingFor === student.id}
+                      className="gap-2"
+                    >
+                      {generatingFor === student.id ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="w-4 h-4" />
+                      )}
+                      Generate
+                    </Button>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+
+            <Card className="bg-card border-border">
+              <CardHeader>
+                <CardTitle className="font-display text-lg flex items-center gap-2">
+                  <MessageSquare className="w-5 h-5 text-accent" />
+                  Recent Feedback
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4 max-h-[500px] overflow-y-auto">
+                {feedbackList.length > 0 ? (
+                  feedbackList.map((feedback) => (
+                    <div key={feedback.id} className="p-4 rounded-lg bg-muted/30 border border-border space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium text-foreground">{feedback.student_name}</span>
+                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${getCategoryColor(feedback.category)}`}>
+                          {feedback.category || "progress"}
+                        </span>
+                      </div>
+                      <p className="text-sm text-muted-foreground line-clamp-4">{feedback.feedback_text}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {new Date(feedback.created_at).toLocaleDateString()}
+                      </p>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-center text-muted-foreground py-8">
+                    No feedback generated yet. Click "Generate" on a student to create AI feedback.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        )}
+      </div>
+    </PortalLayout>
+  );
+}

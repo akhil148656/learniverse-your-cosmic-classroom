@@ -888,6 +888,20 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      get_student_performance_summary: {
+        Args: { student_uuid: string }
+        Returns: {
+          average_score: number
+          focus_score: number
+          quizzes_attempted: number
+          quizzes_passed: number
+          recent_quiz_attempts: Json
+          student_name: string
+          study_time_minutes: number
+          topics_completed: number
+          total_xp: number
+        }[]
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["user_role"]
