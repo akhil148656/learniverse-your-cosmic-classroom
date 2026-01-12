@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
-import { FileText, Clock, CheckCircle, Send, Loader2 } from "lucide-react";
+import { FileText, Clock, CheckCircle, Send, Loader2, Users } from "lucide-react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/cards/EmptyState";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -22,7 +23,9 @@ interface AssignmentData {
     description: string | null;
     due_date: string | null;
     max_score: number | null;
+    class_id: string | null;
   };
+  class_name?: string;
 }
 
 export default function StudentAssignments() {
@@ -30,6 +33,7 @@ export default function StudentAssignments() {
   const [isLoading, setIsLoading] = useState(true);
   const [submitting, setSubmitting] = useState<string | null>(null);
   const [submissionText, setSubmissionText] = useState<Record<string, string>>({});
+  const [studentClassId, setStudentClassId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchAssignments();
@@ -41,13 +45,26 @@ export default function StudentAssignments() {
 
     const { data: student } = await supabase
       .from("students")
-      .select("id")
+      .select("id, class_id")
       .eq("user_id", user.id)
-      .single();
+      .maybeSingle();
 
     if (!student) {
       setIsLoading(false);
       return;
+    }
+
+    setStudentClassId(student.class_id);
+
+    // Fetch class name if student has a class
+    let className = null;
+    if (student.class_id) {
+      const { data: classData } = await supabase
+        .from("classes")
+        .select("name")
+        .eq("id", student.class_id)
+        .maybeSingle();
+      className = classData?.name;
     }
 
     const { data } = await supabase
@@ -65,6 +82,7 @@ export default function StudentAssignments() {
         teacher_feedback: d.teacher_feedback,
         submitted_at: d.submitted_at,
         assignment: d.assignments,
+        class_name: className,
       }));
       setAssignments(formatted);
     }
@@ -101,19 +119,30 @@ export default function StudentAssignments() {
   const submitted = assignments.filter((a) => a.status === "submitted");
   const graded = assignments.filter((a) => a.status === "graded");
 
+  const isOverdue = (dueDate: string | null) => {
+    if (!dueDate) return false;
+    return new Date(dueDate) < new Date();
+  };
+
   const renderAssignment = (a: AssignmentData, showSubmit: boolean = false) => (
     <Card key={a.id} className="bg-card border-border">
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between">
-          <div>
+          <div className="space-y-1">
             <CardTitle className="font-display text-lg text-foreground">{a.assignment.title}</CardTitle>
+            {a.class_name && (
+              <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                <Users className="w-3 h-3" />
+                <span>{a.class_name}</span>
+              </div>
+            )}
             <p className="text-sm text-muted-foreground mt-1">{a.assignment.description || "No description"}</p>
           </div>
           {a.assignment.due_date && (
-            <div className="flex items-center gap-1 text-sm text-muted-foreground">
-              <Clock className="w-4 h-4" />
+            <Badge variant={isOverdue(a.assignment.due_date) && a.status === "pending" ? "destructive" : "outline"}>
+              <Clock className="w-3 h-3 mr-1" />
               {new Date(a.assignment.due_date).toLocaleDateString()}
-            </div>
+            </Badge>
           )}
         </div>
       </CardHeader>
@@ -173,15 +202,33 @@ export default function StudentAssignments() {
       <div className="space-y-6">
         <div>
           <h1 className="font-display text-3xl font-bold text-foreground">Assignments</h1>
-          <p className="text-muted-foreground">Complete assignments from your teacher</p>
+          <p className="text-muted-foreground">
+            {studentClassId 
+              ? "Complete assignments from your class" 
+              : "Join a class to receive assignments"}
+          </p>
         </div>
+
+        {!studentClassId && (
+          <Card className="bg-primary/10 border-primary/20">
+            <CardContent className="p-4 flex items-center gap-3">
+              <Users className="w-8 h-8 text-primary" />
+              <div>
+                <p className="font-medium text-foreground">No class joined</p>
+                <p className="text-sm text-muted-foreground">
+                  Join a class using a class code to receive assignments from your teacher.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {isLoading ? (
           <div className="text-center py-8 text-muted-foreground">Loading...</div>
         ) : assignments.length === 0 ? (
           <EmptyState
             title="No assignments yet"
-            message="Assignments from your teacher will appear here"
+            message={studentClassId ? "Assignments from your teacher will appear here" : "Join a class to see assignments"}
             icon={FileText}
           />
         ) : (
