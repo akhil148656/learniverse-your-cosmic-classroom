@@ -1,16 +1,25 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { BookOpen, Trophy, Target, Brain, Zap, Clock, FlaskConical, FileText } from "lucide-react";
+import { BookOpen, Trophy, Target, Brain, Zap, Clock, FlaskConical, FileText, Users, GraduationCap } from "lucide-react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import { StatsCard } from "@/components/cards/StatsCard";
 import { EmptyState } from "@/components/cards/EmptyState";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
+
+interface ClassInfo {
+  id: string;
+  name: string;
+  description: string | null;
+  grade_level: number | null;
+}
 
 export default function StudentDashboard() {
   const navigate = useNavigate();
   const [student, setStudent] = useState<any>(null);
+  const [classInfo, setClassInfo] = useState<ClassInfo | null>(null);
   const [analytics, setAnalytics] = useState<any[]>([]);
   const [suggestions, setSuggestions] = useState<any[]>([]);
   const [assignments, setAssignments] = useState<any[]>([]);
@@ -23,6 +32,17 @@ export default function StudentDashboard() {
       const { data: studentData } = await supabase.from("students").select("*").eq("user_id", user.id).single();
       if (studentData) {
         setStudent(studentData);
+
+        // Fetch class info if student is in a class
+        if (studentData.class_id) {
+          const { data: classData } = await supabase
+            .from("classes")
+            .select("id, name, description, grade_level")
+            .eq("id", studentData.class_id)
+            .single();
+          setClassInfo(classData);
+        }
+
         const { data: analyticsData } = await supabase.from("student_analytics").select("*").eq("student_id", studentData.id);
         setAnalytics(analyticsData || []);
         const { data: suggestionsData } = await supabase.from("learning_suggestions").select("*, topics(name)").eq("student_id", studentData.id).eq("is_dismissed", false).limit(5);
@@ -42,9 +62,40 @@ export default function StudentDashboard() {
   return (
     <PortalLayout role="student">
       <div className="space-y-6">
-        <div>
-          <h1 className="font-display text-3xl font-bold text-foreground">Welcome back!</h1>
-          <p className="text-muted-foreground">Continue your learning journey</p>
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div>
+            <h1 className="font-display text-3xl font-bold text-foreground">Welcome back!</h1>
+            <p className="text-muted-foreground">Continue your learning journey</p>
+          </div>
+          {classInfo ? (
+            <Card className="bg-gradient-card border-border">
+              <CardContent className="p-4 flex items-center gap-3">
+                <Users className="w-8 h-8 text-primary" />
+                <div>
+                  <p className="text-sm text-muted-foreground">Your Class</p>
+                  <p className="font-display font-semibold text-foreground">{classInfo.name}</p>
+                  <Badge variant="outline" className="mt-1">Grade {classInfo.grade_level}</Badge>
+                </div>
+              </CardContent>
+            </Card>
+          ) : student?.learning_mode === "individual" ? (
+            <Card className="bg-gradient-card border-border">
+              <CardContent className="p-4 flex items-center gap-3">
+                <GraduationCap className="w-8 h-8 text-secondary" />
+                <div>
+                  <p className="text-sm text-muted-foreground">Learning Mode</p>
+                  <p className="font-display font-semibold text-foreground">Individual Learning</p>
+                  <Button 
+                    variant="link" 
+                    className="p-0 h-auto text-primary text-sm"
+                    onClick={() => navigate("/student/onboarding")}
+                  >
+                    Join a class instead
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">

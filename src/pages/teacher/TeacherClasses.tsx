@@ -63,12 +63,29 @@ export default function TeacherClasses() {
     fetchClasses();
   }, []);
 
-  const generateClassCode = () => {
+  const generateUniqueClassCode = async (): Promise<string> => {
     const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     let code = "";
-    for (let i = 0; i < 6; i++) {
-      code += chars.charAt(Math.floor(Math.random() * chars.length));
+    let isUnique = false;
+    
+    while (!isUnique) {
+      code = "";
+      for (let i = 0; i < 6; i++) {
+        code += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      
+      // Check if code already exists
+      const { data } = await supabase
+        .from("classes")
+        .select("id")
+        .eq("class_code", code)
+        .single();
+      
+      if (!data) {
+        isUnique = true;
+      }
     }
+    
     return code;
   };
 
@@ -79,30 +96,39 @@ export default function TeacherClasses() {
     }
 
     setIsCreating(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        toast.error("Not logged in");
+        setIsCreating(false);
+        return;
+      }
 
-    const classCode = generateClassCode();
+      const classCode = await generateUniqueClassCode();
 
-    const { error } = await supabase.from("classes").insert({
-      name: newClass.name,
-      description: newClass.description || null,
-      grade_level: parseInt(newClass.grade_level),
-      class_code: classCode,
-      teacher_id: user.id,
-    });
+      const { error } = await supabase.from("classes").insert({
+        name: newClass.name,
+        description: newClass.description || null,
+        grade_level: parseInt(newClass.grade_level),
+        class_code: classCode,
+        teacher_id: user.id,
+      });
 
-    if (error) {
-      console.error("Error creating class:", error);
+      if (error) {
+        console.error("Error creating class:", error);
+        toast.error("Failed to create class");
+      } else {
+        toast.success(`Class created! Code: ${classCode}`);
+        setDialogOpen(false);
+        setNewClass({ name: "", description: "", grade_level: "6" });
+        await fetchClasses(); // Refresh immediately
+      }
+    } catch (error) {
+      console.error("Error:", error);
       toast.error("Failed to create class");
-    } else {
-      toast.success(`Class created! Code: ${classCode}`);
-      setDialogOpen(false);
-      setNewClass({ name: "", description: "", grade_level: "6" });
-      fetchClasses();
+    } finally {
+      setIsCreating(false);
     }
-
-    setIsCreating(false);
   };
 
   const copyClassCode = (code: string) => {
