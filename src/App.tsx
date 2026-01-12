@@ -21,6 +21,7 @@ import TeacherStudents from "./pages/teacher/TeacherStudents";
 import TeacherAssignments from "./pages/teacher/TeacherAssignments";
 import TeacherAnalytics from "./pages/teacher/TeacherAnalytics";
 import TeacherFeedback from "./pages/teacher/TeacherFeedback";
+import TeacherGrading from "./pages/teacher/TeacherGrading";
 import { TeacherDashboard } from "./pages/teacher/TeacherPages";
 import { ParentDashboard, ParentChildProgress, ParentAIFeedback, ParentAlerts } from "./pages/parent/ParentPages";
 
@@ -51,6 +52,7 @@ const App = () => (
           <Route path="/teacher/assignments" element={<TeacherAssignments />} />
           <Route path="/teacher/analytics" element={<TeacherAnalytics />} />
           <Route path="/teacher/feedback" element={<TeacherFeedback />} />
+          <Route path="/teacher/grading" element={<TeacherGrading />} />
           <Route path="/parent/dashboard" element={<ParentDashboard />} />
           <Route path="/parent/child-progress" element={<ParentChildProgress />} />
           <Route path="/parent/ai-feedback" element={<ParentAIFeedback />} />

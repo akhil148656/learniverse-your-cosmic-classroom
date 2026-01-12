@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import { Plus, FileText, Clock, Users, Trash2, Send, Loader2 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { Plus, FileText, Clock, Users, Trash2, Send, Loader2, CheckSquare } from "lucide-react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -30,6 +31,7 @@ interface ClassData {
 }
 
 export default function TeacherAssignments() {
+  const navigate = useNavigate();
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [classes, setClasses] = useState<ClassData[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -273,6 +275,17 @@ export default function TeacherAssignments() {
                       <Clock className="w-4 h-4" />
                       <span>Due: {new Date(a.due_date).toLocaleDateString()}</span>
                     </div>
+                  )}
+                  {(a.submission_count ?? 0) > 0 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full gap-2"
+                      onClick={() => navigate(`/teacher/grading?assignment=${a.id}`)}
+                    >
+                      <CheckSquare className="w-4 h-4" />
+                      Grade Submissions
+                    </Button>
                   )}
                 </CardContent>
               </Card>
