@@ -12,9 +12,36 @@ interface AIGeneratedNotesProps {
 
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-mentor`;
 
+function getHelpfulAIErrorMessage(raw: string) {
+  const msg = (raw || "").toString();
+  if (/quota exceeded|rate limit|\(429\)/i.test(msg)) {
+    return "AI quota exceeded. Check your Google AI Studio / Cloud billing + quota for this Gemini API key.";
+  }
+  if (/Gemini API error \(404\)|model not found|not found for API version/i.test(msg)) {
+    return "AI model not found. In Supabase Edge Function env vars, set GEMINI_MODEL=gemini-2.0-flash (or remove GEMINI_MODEL).";
+  }
+  if (/GEMINI_API_KEY/i.test(msg)) {
+    return "AI not configured. Add GEMINI_API_KEY in Supabase Edge Function secrets.";
+  }
+  return msg && msg.length < 160 ? msg : "Failed to generate notes";
+}
+
+function extractEdgeFunctionErrorMessage(errorText: string) {
+  const raw = (errorText || "").toString().trim();
+  if (!raw) return "";
+  try {
+    const parsed = JSON.parse(raw);
+    const extracted = parsed?.error || parsed?.message || parsed?.details;
+    return (extracted || raw).toString();
+  } catch {
+    return raw;
+  }
+}
+
 export function AIGeneratedNotes({ topic, onQuizClick }: AIGeneratedNotesProps) {
   const [notes, setNotes] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [aiProvider, setAiProvider] = useState<string | null>(null);
   const navigate = useNavigate();
 
   const generateNotes = async () => {
@@ -28,6 +55,7 @@ export function AIGeneratedNotes({ topic, onQuizClick }: AIGeneratedNotesProps) 
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
           Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
         },
         body: JSON.stringify({
@@ -36,9 +64,21 @@ export function AIGeneratedNotes({ topic, onQuizClick }: AIGeneratedNotesProps) 
         }),
       });
 
-      if (!resp.ok || !resp.body) {
-        throw new Error("Failed to generate notes");
+      if (!resp.ok) {
+        const errorText = await resp.text().catch(() => "");
+        const extracted = extractEdgeFunctionErrorMessage(errorText);
+        if (resp.status === 429) {
+          throw new Error(extracted || "AI quota exceeded (429)");
+        }
+        if (resp.status === 404) {
+          throw new Error(extracted || "AI model not found (404)");
+        }
+        throw new Error(extracted || `HTTP ${resp.status}`);
       }
+      if (!resp.body) throw new Error("No response body");
+
+      // Provider is also sent as an SSE metadata event; capture it when present.
+      setAiProvider(resp.headers.get("X-AI-Provider"));
 
       const reader = resp.body.getReader();
       const decoder = new TextDecoder();
@@ -64,6 +104,9 @@ export function AIGeneratedNotes({ topic, onQuizClick }: AIGeneratedNotesProps) 
 
           try {
             const parsed = JSON.parse(jsonStr);
+            if (parsed?.provider && typeof parsed.provider === "string") {
+              setAiProvider(parsed.provider);
+            }
             const content = parsed.choices?.[0]?.delta?.content as string | undefined;
             if (content) {
               notesContent += content;
@@ -77,7 +120,8 @@ export function AIGeneratedNotes({ topic, onQuizClick }: AIGeneratedNotesProps) 
       }
     } catch (error) {
       console.error("Notes generation error:", error);
-      toast.error("Failed to generate notes");
+      const raw = error instanceof Error ? error.message : String(error);
+      toast.error(getHelpfulAIErrorMessage(raw));
     } finally {
       setIsLoading(false);
     }
@@ -99,6 +143,11 @@ export function AIGeneratedNotes({ topic, onQuizClick }: AIGeneratedNotesProps) 
         <CardTitle className="font-display text-lg flex items-center gap-2">
           <BookOpen className="w-5 h-5 text-primary" />
           AI-Generated Notes: {topic}
+          {aiProvider ? (
+            <span className="ml-2 text-xs px-2 py-1 rounded bg-muted text-muted-foreground border border-border">
+              {aiProvider}
+            </span>
+          ) : null}
         </CardTitle>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={generateNotes} disabled={isLoading}>

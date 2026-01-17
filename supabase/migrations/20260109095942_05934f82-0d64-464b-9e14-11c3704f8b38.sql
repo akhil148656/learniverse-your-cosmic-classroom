@@ -3,6 +3,34 @@
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
+-- If re-running this migration, remove previously created auth trigger/function
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+DROP FUNCTION IF EXISTS public.handle_new_user() CASCADE;
+
+-- Drop existing objects
+DROP TABLE IF EXISTS public.search_history CASCADE;
+DROP TABLE IF EXISTS public.ai_feedback CASCADE;
+DROP TABLE IF EXISTS public.notifications CASCADE;
+DROP TABLE IF EXISTS public.learning_suggestions CASCADE;
+DROP TABLE IF EXISTS public.student_analytics CASCADE;
+DROP TABLE IF EXISTS public.discussion_messages CASCADE;
+DROP TABLE IF EXISTS public.discussion_rooms CASCADE;
+DROP TABLE IF EXISTS public.student_lab_progress CASCADE;
+DROP TABLE IF EXISTS public.virtual_labs CASCADE;
+DROP TABLE IF EXISTS public.quiz_attempts CASCADE;
+DROP TABLE IF EXISTS public.quiz_questions CASCADE;
+DROP TABLE IF EXISTS public.quizzes CASCADE;
+DROP TABLE IF EXISTS public.student_assignments CASCADE;
+DROP TABLE IF EXISTS public.assignments CASCADE;
+DROP TABLE IF EXISTS public.topics CASCADE;
+DROP TABLE IF EXISTS public.subjects CASCADE;
+DROP TABLE IF EXISTS public.parent_students CASCADE;
+DROP TABLE IF EXISTS public.students CASCADE;
+DROP TABLE IF EXISTS public.classes CASCADE;
+DROP TABLE IF EXISTS public.profiles CASCADE;
+DROP TABLE IF EXISTS public.user_roles CASCADE;
+DROP TYPE IF EXISTS public.user_role CASCADE;
+
 -- User roles enum
 CREATE TYPE public.user_role AS ENUM ('student', 'teacher', 'parent');
 
@@ -294,6 +322,35 @@ AS $$
   )
 $$;
 
+-- Helpers to avoid RLS recursion between classes and students
+CREATE OR REPLACE FUNCTION public.get_student_class_id(_user_id UUID)
+RETURNS UUID
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+SET row_security = off
+AS $$
+  SELECT s.class_id
+  FROM public.students s
+  WHERE s.user_id = _user_id
+  LIMIT 1
+$$;
+
+CREATE OR REPLACE FUNCTION public.get_class_teacher_id(_class_id UUID)
+RETURNS UUID
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+SET row_security = off
+AS $$
+  SELECT c.teacher_id
+  FROM public.classes c
+  WHERE c.id = _class_id
+  LIMIT 1
+$$;
+
 -- Function to handle new user creation
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER
@@ -308,6 +365,7 @@ END;
 $$;
 
 -- Trigger for new user
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
@@ -327,28 +385,30 @@ CREATE POLICY "Users can update own profile" ON public.profiles
 
 -- Classes: teachers can manage their classes, students can view their class
 CREATE POLICY "Teachers can manage classes" ON public.classes
-  FOR ALL USING (auth.uid() = teacher_id);
+  FOR ALL
+  USING (auth.uid() = teacher_id)
+  WITH CHECK (auth.uid() = teacher_id);
 
 CREATE POLICY "Students can view their class" ON public.classes
-  FOR SELECT USING (
-    EXISTS (SELECT 1 FROM public.students WHERE user_id = auth.uid() AND class_id = classes.id)
-  );
+  FOR SELECT
+  USING (id = public.get_student_class_id(auth.uid()));
 
 -- Students: users can view/update their own student record
 CREATE POLICY "Users can view own student record" ON public.students
   FOR SELECT USING (auth.uid() = user_id);
 
 CREATE POLICY "Users can update own student record" ON public.students
-  FOR UPDATE USING (auth.uid() = user_id);
+  FOR UPDATE
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
 
 CREATE POLICY "Users can insert own student record" ON public.students
   FOR INSERT WITH CHECK (auth.uid() = user_id);
 
 -- Teachers can view students in their classes
 CREATE POLICY "Teachers can view class students" ON public.students
-  FOR SELECT USING (
-    EXISTS (SELECT 1 FROM public.classes WHERE teacher_id = auth.uid() AND id = students.class_id)
-  );
+  FOR SELECT
+  USING (public.get_class_teacher_id(students.class_id) = auth.uid());
 
 -- Subjects and Topics: readable by all authenticated users
 CREATE POLICY "Subjects readable by all" ON public.subjects

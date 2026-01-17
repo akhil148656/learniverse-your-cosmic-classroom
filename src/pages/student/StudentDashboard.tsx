@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { BookOpen, Trophy, Target, Brain, Zap, Clock, FlaskConical, FileText, Users, GraduationCap } from "lucide-react";
+import { BookOpen, Trophy, Target, Brain, Zap, Clock, FlaskConical, FileText, Users, GraduationCap, Copy, CheckCircle } from "lucide-react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import { StatsCard } from "@/components/cards/StatsCard";
 import { EmptyState } from "@/components/cards/EmptyState";
@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 
 interface ClassInfo {
   id: string;
@@ -23,35 +24,81 @@ export default function StudentDashboard() {
   const [analytics, setAnalytics] = useState<any[]>([]);
   const [suggestions, setSuggestions] = useState<any[]>([]);
   const [assignments, setAssignments] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isLeaving, setIsLeaving] = useState(false);
+  const [copied, setCopied] = useState(false);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+  const fetchStudentData = async () => {
+    setIsLoading(true);
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        navigate("/student/login");
+        return;
+      }
 
-      const { data: studentData } = await supabase.from("students").select("*").eq("user_id", user.id).single();
-      if (studentData) {
-        setStudent(studentData);
+      const { data: studentData, error: studentError } = await supabase
+        .from("students")
+        .select("*")
+        .eq("user_id", user.id)
+        .maybeSingle();
 
-        // Fetch class info if student is in a class
-        if (studentData.class_id) {
-          const { data: classData } = await supabase
-            .from("classes")
-            .select("id, name, description, grade_level")
-            .eq("id", studentData.class_id)
-            .single();
+      if (studentError) {
+        toast.error(studentError.message || "Could not load student profile");
+        return;
+      }
+
+      if (!studentData) {
+        toast.error("Could not find your profile");
+        return;
+      }
+
+      setStudent(studentData);
+
+      if (studentData.class_id) {
+        const { data: classData, error: classError } = await supabase
+          .from("classes")
+          .select("id, name, description, grade_level")
+          .eq("id", studentData.class_id)
+          .single();
+
+        if (classError) {
+          setClassInfo(null);
+        } else {
           setClassInfo(classData);
         }
-
-        const { data: analyticsData } = await supabase.from("student_analytics").select("*").eq("student_id", studentData.id);
-        setAnalytics(analyticsData || []);
-        const { data: suggestionsData } = await supabase.from("learning_suggestions").select("*, topics(name)").eq("student_id", studentData.id).eq("is_dismissed", false).limit(5);
-        setSuggestions(suggestionsData || []);
-        const { data: assignmentsData } = await supabase.from("student_assignments").select("*, assignments(title, due_date)").eq("student_id", studentData.id).eq("status", "pending").limit(5);
-        setAssignments(assignmentsData || []);
+      } else {
+        setClassInfo(null);
       }
-    };
-    fetchData();
+
+      const { data: analyticsData } = await supabase.from("student_analytics").select("*").eq("student_id", studentData.id);
+      setAnalytics(analyticsData || []);
+
+      const { data: suggestionsData } = await supabase
+        .from("learning_suggestions")
+        .select("*, topics(name)")
+        .eq("student_id", studentData.id)
+        .eq("is_dismissed", false)
+        .limit(5);
+      setSuggestions(suggestionsData || []);
+
+      const { data: assignmentsData } = await supabase
+        .from("student_assignments")
+        .select("*, assignments(title, due_date)")
+        .eq("student_id", studentData.id)
+        .eq("status", "pending")
+        .order("due_date", { ascending: true, foreignTable: "assignments" })
+        .limit(6);
+      setAssignments(assignmentsData || []);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void fetchStudentData();
   }, []);
 
   const totalXP = student?.xp_points || 0;
@@ -59,43 +106,118 @@ export default function StudentDashboard() {
   const totalTopics = analytics.reduce((sum, a) => sum + (a.topics_completed || 0), 0);
   const quizzesPassed = analytics.reduce((sum, a) => sum + (a.quizzes_passed || 0), 0);
 
+  const copyStudentCode = async () => {
+    const code = String(student?.student_code || "").trim();
+    if (!code) return;
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+      toast.success("Student code copied");
+    } catch {
+      toast.error("Could not copy student code");
+    }
+  };
+
+  const handleLeaveClass = async () => {
+    if (isLeaving) return;
+    setIsLeaving(true);
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        toast.error("Not logged in");
+        return;
+      }
+
+      const { error } = await supabase
+        .from("students")
+        .update({ class_id: null, learning_mode: "individual" })
+        .eq("user_id", user.id);
+
+      if (error) {
+        toast.error(error.message || "Failed to leave class");
+        return;
+      }
+
+      toast.success("Left class");
+      await fetchStudentData();
+    } finally {
+      setIsLeaving(false);
+    }
+  };
+
   return (
     <PortalLayout role="student">
       <div className="space-y-6">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-          <div>
-            <h1 className="font-display text-3xl font-bold text-foreground">Welcome back!</h1>
-            <p className="text-muted-foreground">Continue your learning journey</p>
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1.8fr)_minmax(0,1fr)]">
+          <div className="space-y-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <h1 className="font-display text-3xl font-bold text-foreground">Welcome back!</h1>
+                <p className="text-muted-foreground">Continue your learning journey</p>
+              </div>
+              <Button variant="outline" onClick={() => navigate("/student/settings")}>
+                Profile
+              </Button>
+            </div>
+
+            {student?.student_code ? (
+              <Card>
+                <CardContent>
+                  <div className="flex flex-col gap-2">
+                    <p className="text-sm text-muted-foreground">Your Student ID</p>
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <span className="text-lg font-semibold tracking-[0.4em]">{student.student_code}</span>
+                      <Button variant="outline" size="sm" className="h-9 px-3" onClick={copyStudentCode}>
+                        {copied ? <CheckCircle className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                        <span className="ml-2 text-xs uppercase tracking-[0.2em]">{copied ? "Copied" : "Copy"}</span>
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : null}
           </div>
-          {classInfo ? (
-            <Card className="bg-gradient-card border-border">
-              <CardContent className="p-4 flex items-center gap-3">
-                <Users className="w-8 h-8 text-primary" />
-                <div>
-                  <p className="text-sm text-muted-foreground">Your Class</p>
-                  <p className="font-display font-semibold text-foreground">{classInfo.name}</p>
-                  <Badge variant="outline" className="mt-1">Grade {classInfo.grade_level}</Badge>
-                </div>
-              </CardContent>
-            </Card>
-          ) : student?.learning_mode === "individual" ? (
-            <Card className="bg-gradient-card border-border">
-              <CardContent className="p-4 flex items-center gap-3">
-                <GraduationCap className="w-8 h-8 text-secondary" />
-                <div>
-                  <p className="text-sm text-muted-foreground">Learning Mode</p>
-                  <p className="font-display font-semibold text-foreground">Individual Learning</p>
-                  <Button 
-                    variant="link" 
-                    className="p-0 h-auto text-primary text-sm"
-                    onClick={() => navigate("/student/onboarding")}
-                  >
-                    Join a class instead
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ) : null}
+
+          <div className="space-y-4">
+            {classInfo ? (
+              <Card>
+                <CardContent className="p-4 flex flex-col gap-3">
+                  <div className="flex items-center gap-3">
+                    <Users className="w-6 h-6 text-primary" />
+                    <div>
+                      <p className="text-sm text-muted-foreground">Your Class</p>
+                      <p className="font-display font-semibold text-foreground">{classInfo.name}</p>
+                      <Badge variant="outline" className="mt-1 text-xs">
+                        Grade {classInfo.grade_level ?? "—"}
+                      </Badge>
+                    </div>
+                  </div>
+                  <div className="flex gap-2 flex-wrap">
+                    <Button variant="outline" size="sm" onClick={() => navigate("/student/assignments")}>
+                      View assignments
+                    </Button>
+                    <Button variant="ghost" size="sm" className="text-destructive" onClick={handleLeaveClass} disabled={isLeaving}>
+                      {isLeaving ? "Leaving..." : "Leave class"}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : student?.learning_mode === "individual" ? (
+              <Card>
+                <CardContent className="p-4 flex items-center gap-3">
+                  <GraduationCap className="w-8 h-8 text-secondary" />
+                  <div>
+                    <p className="text-sm text-muted-foreground">Learning Mode</p>
+                    <p className="font-display font-semibold text-foreground">Individual Learning</p>
+                    <Button variant="link" className="text-sm p-0" onClick={() => navigate("/student/onboarding")}>Join a class instead</Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : null}
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -106,7 +228,7 @@ export default function StudentDashboard() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <Card className="bg-card border-border">
+          <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle className="font-display text-lg">Smart Learning Suggestions</CardTitle>
               <Zap className="w-5 h-5 text-primary" />
@@ -114,23 +236,32 @@ export default function StudentDashboard() {
             <CardContent>
               {suggestions.length > 0 ? (
                 <div className="space-y-3">
-                  {suggestions.map((s) => (
-                    <Button key={s.id} variant="outline" className="w-full justify-start gap-3 h-auto py-3 bg-muted/50 border-border hover:border-primary" onClick={() => navigate(`/student/search?topic=${s.topic_id}`)}>
+                  {suggestions.map((suggestion) => (
+                    <Button
+                      key={suggestion.id}
+                      variant="outline"
+                      className="w-full justify-start gap-3 h-auto py-3"
+                      onClick={() => navigate(`/student/search?topic=${suggestion.topics?.name || ""}`)}
+                    >
                       <BookOpen className="w-5 h-5 text-primary" />
                       <div className="text-left">
-                        <p className="font-medium text-foreground">{s.topics?.name || "Topic"}</p>
-                        <p className="text-sm text-muted-foreground">{s.suggestion_text}</p>
+                        <p className="font-medium text-foreground">{suggestion.topics?.name || "Topic"}</p>
+                        <p className="text-sm text-muted-foreground">{suggestion.suggestion_text}</p>
                       </div>
                     </Button>
                   ))}
                 </div>
               ) : (
-                <EmptyState title="No suggestions yet" message="AI suggestions will appear based on your learning" icon={Brain} />
+                <EmptyState
+                  title={isLoading ? "Loading suggestions" : "No suggestions yet"}
+                  message={isLoading ? "Curating personalized prompts" : "AI suggestions will appear based on your learning"}
+                  icon={Brain}
+                />
               )}
             </CardContent>
           </Card>
 
-          <Card className="bg-card border-border">
+          <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle className="font-display text-lg">Pending Tasks</CardTitle>
               <FileText className="w-5 h-5 text-accent" />
@@ -138,24 +269,35 @@ export default function StudentDashboard() {
             <CardContent>
               {assignments.length > 0 ? (
                 <div className="space-y-3">
-                  {assignments.map((a) => (
-                    <Button key={a.id} variant="outline" className="w-full justify-start gap-3 h-auto py-3 bg-muted/50 border-border hover:border-accent" onClick={() => navigate(`/student/assignments`)}>
+                  {assignments.map((assignment) => (
+                    <Button
+                      key={assignment.id}
+                      variant="outline"
+                      className="w-full justify-start gap-3 h-auto py-3"
+                      onClick={() => navigate(`/student/assignments`)}
+                    >
                       <Clock className="w-5 h-5 text-accent" />
                       <div className="text-left">
-                        <p className="font-medium text-foreground">{a.assignments?.title}</p>
-                        <p className="text-sm text-muted-foreground">Due: {a.assignments?.due_date ? new Date(a.assignments.due_date).toLocaleDateString() : "No deadline"}</p>
+                        <p className="font-medium text-foreground">{assignment.assignments?.title}</p>
+                        <p className="text-sm text-muted-foreground">
+                          Due: {assignment.assignments?.due_date ? new Date(assignment.assignments.due_date).toLocaleDateString() : "No deadline"}
+                        </p>
                       </div>
                     </Button>
                   ))}
                 </div>
               ) : (
-                <EmptyState title="No pending tasks" message="You're all caught up!" icon={FileText} />
+                <EmptyState
+                  title={isLoading ? "Loading assignments" : "No pending tasks"}
+                  message={isLoading ? "Gathering your tasks" : "You're all caught up!"}
+                  icon={FileText}
+                />
               )}
             </CardContent>
           </Card>
         </div>
 
-        <Card className="bg-card border-border">
+        <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="font-display text-lg">Virtual Labs</CardTitle>
             <FlaskConical className="w-5 h-5 text-secondary" />
@@ -163,7 +305,12 @@ export default function StudentDashboard() {
           <CardContent>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {["Physics", "Chemistry", "Biology", "Geography"].map((lab) => (
-                <Button key={lab} variant="outline" className="h-24 flex flex-col gap-2 bg-gradient-card border-border hover:border-secondary" onClick={() => navigate("/student/virtual-labs")}>
+                <Button
+                  key={lab}
+                  variant="outline"
+                  className="h-24 flex flex-col gap-2"
+                  onClick={() => navigate("/student/virtual-labs")}
+                >
                   <FlaskConical className="w-6 h-6 text-secondary" />
                   <span className="font-display text-sm">{lab}</span>
                 </Button>

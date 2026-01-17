@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Users, User, ArrowRight, CheckCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,12 +11,95 @@ import { useToast } from "@/hooks/use-toast";
 
 export default function StudentOnboarding() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const initialClassCode = (searchParams.get("class") || "").toUpperCase();
   const { toast } = useToast();
-  const [mode, setMode] = useState<"classroom" | "individual" | null>(null);
-  const [classCode, setClassCode] = useState("");
+  const [mode, setMode] = useState<"classroom" | "individual" | null>(initialClassCode ? "classroom" : null);
+  const [classCode, setClassCode] = useState(initialClassCode);
   const [isLoading, setIsLoading] = useState(false);
   const [classInfo, setClassInfo] = useState<{ name: string; grade_level: number | null } | null>(null);
   const [codeValidated, setCodeValidated] = useState(false);
+
+  const applyStudentIdentityDetails = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const meta: any = user.user_metadata || {};
+    const phone = typeof meta.phone === "string" ? meta.phone : null;
+    const gradeLevel = Number.isFinite(Number(meta.grade_level)) ? Number(meta.grade_level) : null;
+    const gender = typeof meta.gender === "string" ? meta.gender : null;
+    const preferredLanguageRaw = typeof meta.preferred_language === "string" ? meta.preferred_language : null;
+    const preferredLanguage = preferredLanguageRaw ? preferredLanguageRaw.trim() : null;
+
+    // Update profile (phone + gender are stored on profiles)
+    try {
+      const profilePayload: any = {};
+      if (phone) profilePayload.phone = phone;
+      if (gender) profilePayload.gender = gender;
+
+      if (Object.keys(profilePayload).length > 0) {
+        const update = await supabase
+          .from("profiles")
+          .update(profilePayload, { count: "exact" })
+          .eq("user_id", user.id);
+
+        if (update.error) {
+          const msg = String((update.error as any)?.message || "");
+          if (/gender/i.test(msg)) {
+            const fallbackUpdate: any = {};
+            if (phone) fallbackUpdate.phone = phone;
+            if (Object.keys(fallbackUpdate).length > 0) {
+              await supabase.from("profiles").update(fallbackUpdate, { count: "exact" }).eq("user_id", user.id);
+            }
+          }
+        }
+
+        if ((update.count ?? 0) === 0) {
+          const insert = await supabase.from("profiles").insert({ user_id: user.id, ...profilePayload } as any);
+          if (insert.error) {
+            const msg = String((insert.error as any)?.message || "");
+            if (/gender/i.test(msg)) {
+              const fallbackInsert: any = { user_id: user.id };
+              if (phone) fallbackInsert.phone = phone;
+              if (Object.keys(fallbackInsert).length > 1) {
+                await supabase.from("profiles").insert(fallbackInsert as any);
+              }
+            }
+          }
+        }
+      }
+    } catch {
+      // Non-blocking: onboarding can proceed even if profile update fails.
+    }
+
+    // Update or create student row with grade_level + gender
+    const { data: existingStudent } = await supabase
+      .from("students")
+      .select("id")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (existingStudent) {
+      const updatePayload: any = {};
+      if (gradeLevel !== null) updatePayload.grade_level = gradeLevel;
+      if (gender) updatePayload.gender = gender;
+      if (preferredLanguage) updatePayload.preferred_language = preferredLanguage;
+      if (Object.keys(updatePayload).length > 0) {
+        await supabase
+          .from("students")
+          .update(updatePayload)
+          .eq("user_id", user.id);
+      }
+    } else {
+      const insertPayload: any = { user_id: user.id };
+      if (gradeLevel !== null) insertPayload.grade_level = gradeLevel;
+      if (gender) insertPayload.gender = gender;
+      if (preferredLanguage) insertPayload.preferred_language = preferredLanguage;
+      await supabase
+        .from("students")
+        .insert(insertPayload);
+    }
+  };
 
   // Validate class code as user types
   useEffect(() => {
@@ -27,19 +110,19 @@ export default function StudentOnboarding() {
         return;
       }
 
-      const { data, error } = await supabase
-        .from("classes")
-        .select("id, name, grade_level")
-        .eq("class_code", classCode.toUpperCase())
-        .single();
+      const { data, error } = await supabase.rpc("find_class_by_code", {
+        _code: classCode.toUpperCase(),
+      });
 
-      if (data && !error) {
-        setClassInfo({ name: data.name, grade_level: data.grade_level });
+      const cls = !error && data && data.length > 0 ? data[0] : null;
+      if (cls) {
+        setClassInfo({ name: cls.name, grade_level: cls.grade_level });
         setCodeValidated(true);
-      } else {
-        setClassInfo(null);
-        setCodeValidated(false);
+        return;
       }
+
+      setClassInfo(null);
+      setCodeValidated(false);
     };
 
     const debounce = setTimeout(validateCode, 300);
@@ -52,21 +135,13 @@ export default function StudentOnboarding() {
       return;
     }
 
+    if (classCode.trim().length < 6) {
+      toast({ title: "Enter a 6-character class code", variant: "destructive" });
+      return;
+    }
+
     setIsLoading(true);
     try {
-      // Fetch class data
-      const { data: classData, error: classError } = await supabase
-        .from("classes")
-        .select("id, name")
-        .eq("class_code", classCode.toUpperCase())
-        .single();
-
-      if (classError || !classData) {
-        toast({ title: "Invalid class code", description: "Please check and try again", variant: "destructive" });
-        setIsLoading(false);
-        return;
-      }
-
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         toast({ title: "Not logged in", description: "Please log in first", variant: "destructive" });
@@ -74,51 +149,28 @@ export default function StudentOnboarding() {
         return;
       }
 
-      // Check if student record exists
-      const { data: existingStudent } = await supabase
-        .from("students")
-        .select("id")
-        .eq("user_id", user.id)
-        .single();
+      const code = classCode.trim().toUpperCase();
+      const { error } = await supabase.rpc("student_join_class_by_code", { _code: code });
 
-      if (existingStudent) {
-        // Update existing student record with class_id
-        const { error: updateError } = await supabase
-          .from("students")
-          .update({ 
-            class_id: classData.id, 
-            learning_mode: "classroom" 
-          })
-          .eq("user_id", user.id);
-
-        if (updateError) {
-          console.error("Update error:", updateError);
-          toast({ title: "Error joining class", description: updateError.message, variant: "destructive" });
-          setIsLoading(false);
-          return;
-        }
-      } else {
-        // Create new student record
-        const { error: insertError } = await supabase
-          .from("students")
-          .insert({ 
-            user_id: user.id,
-            class_id: classData.id, 
-            learning_mode: "classroom" 
-          });
-
-        if (insertError) {
-          console.error("Insert error:", insertError);
-          toast({ title: "Error joining class", description: insertError.message, variant: "destructive" });
-          setIsLoading(false);
-          return;
-        }
+      if (error) {
+        toast({
+          title: "Could not join class",
+          description: error.message || "Please check the code and try again",
+          variant: "destructive",
+        });
+        return;
       }
 
-      toast({ title: "Joined class successfully!", description: `Welcome to ${classData.name}` });
+      // Ensure phone/grade/gender metadata is persisted after joining.
+      await applyStudentIdentityDetails();
+
+      toast({
+        title: "Joined class successfully!",
+        description: classInfo?.name ? `Welcome to ${classInfo.name}` : "Welcome!",
+      });
       navigate("/student/dashboard");
     } catch (error: any) {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
+      toast({ title: "Error", description: error?.message || "Something went wrong", variant: "destructive" });
     } finally {
       setIsLoading(false);
     }
@@ -135,26 +187,42 @@ export default function StudentOnboarding() {
       }
 
       // Check if student record exists
-      const { data: existingStudent } = await supabase
+      const { data: existingStudent, error: existingError } = await supabase
         .from("students")
         .select("id")
         .eq("user_id", user.id)
-        .single();
+        .maybeSingle();
+
+      if (existingError) throw existingError;
 
       if (existingStudent) {
-        await supabase
+        const { error } = await supabase
           .from("students")
           .update({ learning_mode: "individual", class_id: null })
           .eq("user_id", user.id);
+
+        if (error) {
+          console.error("Failed to update student record:", error);
+          throw error;
+        }
       } else {
-        await supabase
+        const { error } = await supabase
           .from("students")
           .insert({ 
             user_id: user.id,
             learning_mode: "individual" 
           });
+
+        if (error) {
+          console.error("Failed to create student record:", error);
+          throw error;
+        }
       }
 
+      // Persist phone/grade/gender metadata
+      await applyStudentIdentityDetails();
+
+      toast({ title: "Success!", description: "Welcome to individual learning" });
       navigate("/student/dashboard");
     } catch (error: any) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
@@ -212,10 +280,21 @@ export default function StudentOnboarding() {
               )}
               
               <div className="flex gap-3">
-                <Button variant="outline" onClick={() => { setMode(null); setClassCode(""); setClassInfo(null); }} className="flex-1">Back</Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setMode(null);
+                    setClassCode("");
+                    setClassInfo(null);
+                    setCodeValidated(false);
+                  }}
+                  className="flex-1"
+                >
+                  Back
+                </Button>
                 <Button 
                   onClick={handleJoinClass} 
-                  disabled={isLoading || !codeValidated} 
+                  disabled={isLoading || classCode.trim().length < 6} 
                   className="flex-1 bg-primary"
                 >
                   {isLoading ? "Joining..." : "Join Class"} <ArrowRight className="w-4 h-4 ml-2" />

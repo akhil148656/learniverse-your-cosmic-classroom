@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { StarField } from "@/components/ui/StarField";
+import { ToastAction } from "@/components/ui/toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 
@@ -21,7 +22,66 @@ export default function StudentLogin() {
     phone: "",
     gradeLevel: "",
     fullName: "",
+    gender: "" as "male" | "female" | "other" | "prefer_not_to_say" | "",
+    preferredLanguage: "en" as string,
   });
+
+  const normalizeEmail = (email: string) => email.trim().toLowerCase();
+
+  const resendSignupConfirmation = async (email: string) => {
+    try {
+      const { error } = await supabase.auth.resend({
+        type: "signup",
+        email,
+        options: {
+          emailRedirectTo: `${window.location.origin}/student/onboarding`,
+        },
+      });
+
+      if (error) throw error;
+
+      toast({
+        title: "Email sent",
+        description: "Check your inbox (and spam folder) to confirm your email.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error?.message || "Failed to resend confirmation email",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const redirectAfterAuth = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      navigate("/student/login");
+      return;
+    }
+
+    const { data: studentRow, error } = await supabase
+      .from("students")
+      .select("learning_mode, class_id")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (error) {
+      // If anything weird happens, go to dashboard and let it handle onboarding.
+      // This avoids redirect loops caused by transient read failures.
+      navigate("/student/dashboard");
+      return;
+    }
+
+    const hasMode = !!studentRow?.learning_mode;
+    const hasClassWhenNeeded = studentRow?.learning_mode !== "classroom" || !!studentRow?.class_id;
+    if (!hasMode || !hasClassWhenNeeded) {
+      navigate("/student/onboarding");
+      return;
+    }
+
+    navigate("/student/dashboard");
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,42 +89,44 @@ export default function StudentLogin() {
 
     try {
       if (isSignUp) {
+        const email = normalizeEmail(formData.email);
         const { data, error } = await supabase.auth.signUp({
-          email: formData.email,
+          email,
           password: formData.password,
           options: {
             emailRedirectTo: `${window.location.origin}/student/onboarding`,
             data: {
               full_name: formData.fullName,
               role: "student",
+              phone: formData.phone || null,
+              grade_level: formData.gradeLevel ? Number(formData.gradeLevel) : null,
+              gender: formData.gender || null,
+              preferred_language: formData.preferredLanguage || null,
             },
           },
         });
 
         if (error) throw error;
 
-        if (data.user) {
-          // Add student role
-          await supabase.from("user_roles").insert({
-            user_id: data.user.id,
-            role: "student",
-          });
-
-          // Create student record
-          await supabase.from("students").insert({
-            user_id: data.user.id,
-            grade_level: parseInt(formData.gradeLevel) || null,
-          });
-
+        // If email confirmations are enabled in Supabase, there may be no session yet.
+        if (!data.session) {
           toast({
-            title: "Account created!",
-            description: "Redirecting to onboarding...",
+            title: "Check your email",
+            description: "Confirm your email, then log in to continue.",
           });
-          navigate("/student/onboarding");
+          setIsSignUp(false);
+          return;
         }
+
+        toast({
+          title: "Account created!",
+          description: "Redirecting to onboarding...",
+        });
+        await redirectAfterAuth();
       } else {
+        const email = normalizeEmail(formData.email);
         const { error } = await supabase.auth.signInWithPassword({
-          email: formData.email,
+          email,
           password: formData.password,
         });
 
@@ -72,15 +134,27 @@ export default function StudentLogin() {
 
         toast({
           title: "Welcome back!",
-          description: "Redirecting to dashboard...",
+          description: "Redirecting...",
         });
-        navigate("/student/dashboard");
+        await redirectAfterAuth();
       }
     } catch (error: any) {
+      const message = String(error?.message || "Something went wrong");
+      const email = normalizeEmail(formData.email);
+      const showResend =
+        !!email && (/invalid login credentials/i.test(message) || /email not confirmed/i.test(message));
       toast({
         title: "Error",
-        description: error.message || "Something went wrong",
+        description:
+          /invalid login credentials/i.test(message)
+            ? "Invalid email or password. If you just signed up, confirm your email first."
+            : message,
         variant: "destructive",
+        action: showResend ? (
+          <ToastAction altText="Resend confirmation email" onClick={() => resendSignupConfirmation(email)}>
+            Resend email
+          </ToastAction>
+        ) : undefined,
       });
     } finally {
       setIsLoading(false);
@@ -179,6 +253,24 @@ export default function StudentLogin() {
                 </div>
 
                 <div className="space-y-2">
+                  <Label className="text-foreground">Gender</Label>
+                  <Select
+                    value={formData.gender}
+                    onValueChange={(value) => setFormData({ ...formData, gender: value as any })}
+                  >
+                    <SelectTrigger className="bg-input border-border">
+                      <SelectValue placeholder="Select gender" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="male">Male</SelectItem>
+                      <SelectItem value="female">Female</SelectItem>
+                      <SelectItem value="other">Other</SelectItem>
+                      <SelectItem value="prefer_not_to_say">Prefer not to say</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
                   <Label htmlFor="gradeLevel" className="text-foreground">Class / Grade Level</Label>
                   <Select
                     value={formData.gradeLevel}
@@ -193,6 +285,31 @@ export default function StudentLogin() {
                           Class {grade}
                         </SelectItem>
                       ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-foreground">Preferred Learning Language</Label>
+                  <Select
+                    value={formData.preferredLanguage}
+                    onValueChange={(value) => setFormData({ ...formData, preferredLanguage: value })}
+                  >
+                    <SelectTrigger className="bg-input border-border">
+                      <SelectValue placeholder="Select language" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="en">English</SelectItem>
+                      <SelectItem value="hi">Hindi</SelectItem>
+                      <SelectItem value="ta">Tamil</SelectItem>
+                      <SelectItem value="te">Telugu</SelectItem>
+                      <SelectItem value="kn">Kannada</SelectItem>
+                      <SelectItem value="ml">Malayalam</SelectItem>
+                      <SelectItem value="bn">Bengali</SelectItem>
+                      <SelectItem value="mr">Marathi</SelectItem>
+                      <SelectItem value="gu">Gujarati</SelectItem>
+                      <SelectItem value="pa">Punjabi</SelectItem>
+                      <SelectItem value="ur">Urdu</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

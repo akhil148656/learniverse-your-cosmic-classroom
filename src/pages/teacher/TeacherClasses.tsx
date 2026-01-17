@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Copy, Users, BookOpen, Trash2 } from "lucide-react";
+import { Plus, Copy, Users, BookOpen, Trash2, Link2, UserPlus } from "lucide-react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -29,9 +29,20 @@ export default function TeacherClasses() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [newClass, setNewClass] = useState({ name: "", description: "", grade_level: "6" });
 
+  const [addStudentForClassId, setAddStudentForClassId] = useState<string | null>(null);
+  const [addStudentCode, setAddStudentCode] = useState("");
+  const [isAddingStudent, setIsAddingStudent] = useState(false);
+
   const fetchClasses = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    setIsLoading(true);
+
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (userError || !user) {
+      console.error("Auth error fetching user:", userError);
+      toast.error(userError?.message || "Not logged in");
+      setIsLoading(false);
+      return;
+    }
 
     const { data, error } = await supabase
       .from("classes")
@@ -41,16 +52,21 @@ export default function TeacherClasses() {
 
     if (error) {
       console.error("Error fetching classes:", error);
+      toast.error(`Could not load classes: ${error.message}`);
+      setIsLoading(false);
       return;
     }
 
-    // Get student counts for each class
+    // Get student counts for each class; if a count fails, keep zero but log it
     const classesWithCounts = await Promise.all(
       (data || []).map(async (cls) => {
-        const { count } = await supabase
+        const { count, error: countError } = await supabase
           .from("students")
           .select("*", { count: "exact", head: true })
           .eq("class_id", cls.id);
+        if (countError) {
+          console.error("Error counting students for class", cls.id, countError);
+        }
         return { ...cls, student_count: count || 0 };
       })
     );
@@ -63,29 +79,12 @@ export default function TeacherClasses() {
     fetchClasses();
   }, []);
 
-  const generateUniqueClassCode = async (): Promise<string> => {
+  const generateRandomClassCode = (): string => {
     const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     let code = "";
-    let isUnique = false;
-    
-    while (!isUnique) {
-      code = "";
-      for (let i = 0; i < 6; i++) {
-        code += chars.charAt(Math.floor(Math.random() * chars.length));
-      }
-      
-      // Check if code already exists
-      const { data } = await supabase
-        .from("classes")
-        .select("id")
-        .eq("class_code", code)
-        .single();
-      
-      if (!data) {
-        isUnique = true;
-      }
+    for (let i = 0; i < 6; i++) {
+      code += chars.charAt(Math.floor(Math.random() * chars.length));
     }
-    
     return code;
   };
 
@@ -104,25 +103,41 @@ export default function TeacherClasses() {
         return;
       }
 
-      const classCode = await generateUniqueClassCode();
+      // Under RLS a teacher cannot SELECT other teachers' classes,
+      // so we ensure uniqueness by retrying insert if the unique constraint hits.
+      let createdCode: string | null = null;
+      let lastError: any = null;
 
-      const { error } = await supabase.from("classes").insert({
-        name: newClass.name,
-        description: newClass.description || null,
-        grade_level: parseInt(newClass.grade_level),
-        class_code: classCode,
-        teacher_id: user.id,
-      });
+      for (let attempt = 0; attempt < 10; attempt++) {
+        const classCode = generateRandomClassCode();
+        const { error } = await supabase.from("classes").insert({
+          name: newClass.name,
+          description: newClass.description || null,
+          grade_level: parseInt(newClass.grade_level),
+          class_code: classCode,
+          teacher_id: user.id,
+        });
 
-      if (error) {
-        console.error("Error creating class:", error);
-        toast.error("Failed to create class");
-      } else {
-        toast.success(`Class created! Code: ${classCode}`);
-        setDialogOpen(false);
-        setNewClass({ name: "", description: "", grade_level: "6" });
-        await fetchClasses(); // Refresh immediately
+        if (!error) {
+          createdCode = classCode;
+          break;
+        }
+
+        lastError = error;
+        const isUniqueViolation = (error as any)?.code === "23505";
+        if (!isUniqueViolation) break;
       }
+
+      if (!createdCode) {
+        console.error("Error creating class:", lastError);
+        toast.error(`Failed to create class: ${lastError?.message || "Unknown error"}`);
+        return;
+      }
+
+      toast.success(`Class created! Code: ${createdCode}`);
+      setDialogOpen(false);
+      setNewClass({ name: "", description: "", grade_level: "6" });
+      await fetchClasses(); // Refresh immediately
     } catch (error) {
       console.error("Error:", error);
       toast.error("Failed to create class");
@@ -136,6 +151,21 @@ export default function TeacherClasses() {
     toast.success("Class code copied!");
   };
 
+  const getClassLink = (code: string) => {
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    return origin ? `${origin}/student/onboarding?class=${code}` : "";
+  };
+
+  const copyClassLink = (code: string) => {
+    const link = getClassLink(code);
+    if (!link) {
+      toast.error("Unable to build class link");
+      return;
+    }
+    navigator.clipboard.writeText(link);
+    toast.success("Class link copied!");
+  };
+
   const deleteClass = async (classId: string) => {
     const { error } = await supabase.from("classes").delete().eq("id", classId);
     if (error) {
@@ -143,6 +173,32 @@ export default function TeacherClasses() {
     } else {
       toast.success("Class deleted");
       fetchClasses();
+    }
+  };
+
+  const addStudentToClassByCode = async () => {
+    if (!addStudentForClassId) return;
+    if (!addStudentCode.trim()) {
+      toast.error("Enter a student ID");
+      return;
+    }
+
+    setIsAddingStudent(true);
+    try {
+      const { error } = await supabase.rpc("teacher_add_student_to_class_by_code", {
+        _class_id: addStudentForClassId,
+        _student_code: addStudentCode.trim().toUpperCase(),
+      });
+      if (error) {
+        toast.error(error.message);
+        return;
+      }
+      toast.success("Student added to class");
+      setAddStudentCode("");
+      setAddStudentForClassId(null);
+      await fetchClasses();
+    } finally {
+      setIsAddingStudent(false);
     }
   };
 
@@ -210,6 +266,43 @@ export default function TeacherClasses() {
           </Dialog>
         </div>
 
+        <Dialog open={!!addStudentForClassId} onOpenChange={(open) => { if (!open) setAddStudentForClassId(null); }}>
+          <DialogContent className="bg-card border-border">
+            <DialogHeader>
+              <DialogTitle className="font-display flex items-center gap-2">
+                <UserPlus className="w-5 h-5 text-primary" />
+                Add Student by ID
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3 mt-2">
+              <Label htmlFor="student-code">Student ID</Label>
+              <Input
+                id="student-code"
+                placeholder="e.g., STU-XXXXXXXXXX"
+                value={addStudentCode}
+                onChange={(e) => setAddStudentCode(e.target.value)}
+                className="bg-muted border-border"
+              />
+              <div className="flex gap-2 justify-end">
+                <Button
+                  variant="outline"
+                  onClick={() => setAddStudentForClassId(null)}
+                  disabled={isAddingStudent}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  className="bg-primary hover:bg-primary/90"
+                  onClick={addStudentToClassByCode}
+                  disabled={isAddingStudent}
+                >
+                  {isAddingStudent ? "Adding..." : "Add"}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
         {isLoading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {[1, 2, 3].map((i) => (
@@ -257,6 +350,32 @@ export default function TeacherClasses() {
                       <Copy className="w-3 h-3" />
                       {cls.class_code}
                     </Button>
+                  </div>
+                  <div className="mt-3 flex flex-col gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-2"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setAddStudentForClassId(cls.id);
+                      }}
+                    >
+                      <UserPlus className="w-4 h-4" />
+                      Add student by ID
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="gap-2"
+                      onClick={(e) => { e.stopPropagation(); copyClassLink(cls.class_code); }}
+                    >
+                      <Link2 className="w-4 h-4" />
+                      Copy class join link
+                    </Button>
+                    <p className="text-xs text-muted-foreground break-all">
+                      {getClassLink(cls.class_code)}
+                    </p>
                   </div>
                 </CardContent>
               </Card>

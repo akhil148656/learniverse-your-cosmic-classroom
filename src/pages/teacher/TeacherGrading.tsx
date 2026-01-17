@@ -18,6 +18,8 @@ interface Submission {
   student_id: string;
   status: string;
   submission_text: string | null;
+  submission_attachment_path?: string | null;
+  submission_attachment_name?: string | null;
   submitted_at: string | null;
   score: number | null;
   teacher_feedback: string | null;
@@ -25,6 +27,8 @@ interface Submission {
   assignment_title: string;
   max_score: number;
 }
+
+const SUBMISSIONS_BUCKET = "assignment-submissions";
 
 interface Assignment {
   id: string;
@@ -40,6 +44,18 @@ export default function TeacherGrading() {
   const [isLoading, setIsLoading] = useState(true);
   const [grading, setGrading] = useState<string | null>(null);
   const [grades, setGrades] = useState<Record<string, { score: string; feedback: string }>>({});
+
+  const openAttachment = async (path: string) => {
+    const { data, error } = await supabase.storage
+      .from(SUBMISSIONS_BUCKET)
+      .createSignedUrl(path, 60 * 10);
+    if (error || !data?.signedUrl) {
+      console.error("Failed to create signed URL", error);
+      toast.error("Failed to open attachment");
+      return;
+    }
+    window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+  };
 
   useEffect(() => {
     fetchAssignments();
@@ -109,6 +125,8 @@ export default function TeacherGrading() {
         student_id: d.student_id,
         status: d.status,
         submission_text: d.submission_text,
+        submission_attachment_path: d.submission_attachment_path,
+        submission_attachment_name: d.submission_attachment_name,
         submitted_at: d.submitted_at,
         score: d.score,
         teacher_feedback: d.teacher_feedback,
@@ -133,13 +151,19 @@ export default function TeacherGrading() {
       .update({
         score: parseInt(grade.score),
         teacher_feedback: grade.feedback || null,
-        status: "graded",
+        status: "reviewed",
         reviewed_at: new Date().toISOString(),
       })
       .eq("id", submissionId);
 
     if (error) {
-      toast.error("Failed to grade submission");
+      const msg = error.message || "Failed to grade submission";
+      console.error("Failed to grade submission:", error);
+      if (msg.toLowerCase().includes("row-level security")) {
+        toast.error("Permission denied by database policy. Run the latest Supabase migrations (RLS policies) and try again.");
+      } else {
+        toast.error(msg);
+      }
     } else {
       toast.success("Submission graded!");
       fetchSubmissions(selectedAssignment);
@@ -148,7 +172,7 @@ export default function TeacherGrading() {
   };
 
   const pendingGrading = submissions.filter(s => s.status === "submitted");
-  const graded = submissions.filter(s => s.status === "graded");
+  const graded = submissions.filter(s => s.status === "reviewed");
 
   return (
     <PortalLayout role="teacher">
@@ -214,6 +238,20 @@ export default function TeacherGrading() {
                             <p className="text-sm text-muted-foreground mb-2">Student's Submission:</p>
                             <p className="text-foreground whitespace-pre-wrap">{s.submission_text}</p>
                           </div>
+
+                          {s.submission_attachment_path && (
+                            <div className="flex items-center justify-between rounded-lg bg-muted/30 border border-border p-3">
+                              <div className="text-sm text-muted-foreground truncate">
+                                Attachment: <span className="text-foreground">{s.submission_attachment_name || "file"}</span>
+                              </div>
+                              <Button
+                                variant="outline"
+                                onClick={() => openAttachment(s.submission_attachment_path!)}
+                              >
+                                View
+                              </Button>
+                            </div>
+                          )}
                           
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div className="space-y-2">

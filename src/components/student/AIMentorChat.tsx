@@ -40,10 +40,41 @@ export function AIMentorChat() {
         <ScrollArea className="flex-1 pr-4" ref={scrollRef}>
           <div className="space-y-4">
             {messages.length === 0 && (
-              <div className="text-center text-muted-foreground py-8">
-                <Bot className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                <p className="font-display">Hi! I'm your AI learning mentor.</p>
-                <p className="text-sm mt-2">Ask me anything about your studies!</p>
+              <div className="text-center text-muted-foreground py-8 space-y-4">
+                <Bot className="w-16 h-16 mx-auto mb-4 text-primary animate-pulse" />
+                <div>
+                  <p className="font-display text-lg text-foreground">Hi! I'm your AI learning mentor 🤖</p>
+                  <p className="text-sm mt-2">Powered by Google Gemini AI</p>
+                </div>
+                <div className="text-left max-w-md mx-auto mt-6 space-y-2">
+                  <p className="text-xs font-semibold text-foreground">Try asking:</p>
+                  <div className="space-y-2">
+                    <button
+                      onClick={() => {
+                        setInput("Explain photosynthesis in simple terms");
+                      }}
+                      className="w-full text-left px-4 py-2 rounded-lg bg-muted/50 hover:bg-muted text-sm transition-colors"
+                    >
+                      💡 Explain photosynthesis in simple terms
+                    </button>
+                    <button
+                      onClick={() => {
+                        setInput("Help me solve quadratic equations");
+                      }}
+                      className="w-full text-left px-4 py-2 rounded-lg bg-muted/50 hover:bg-muted text-sm transition-colors"
+                    >
+                      ➕ Help me solve quadratic equations
+                    </button>
+                    <button
+                      onClick={() => {
+                        setInput("What caused World War 2?");
+                      }}
+                      className="w-full text-left px-4 py-2 rounded-lg bg-muted/50 hover:bg-muted text-sm transition-colors"
+                    >
+                      📚 What caused World War 2?
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
             {messages.map((msg, i) => (

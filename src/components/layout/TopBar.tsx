@@ -25,6 +25,9 @@ export function TopBar({ showSearch = true, role }: TopBarProps) {
   const [notificationCount, setNotificationCount] = useState(0);
 
   useEffect(() => {
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    let intervalId: number | null = null;
+
     const fetchProfile = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
@@ -35,15 +38,41 @@ export function TopBar({ showSearch = true, role }: TopBarProps) {
           .single();
         if (data) setProfile(data);
 
-        const { count } = await supabase
-          .from("notifications")
-          .select("*", { count: "exact", head: true })
-          .eq("user_id", user.id)
-          .eq("is_read", false);
-        setNotificationCount(count || 0);
+        const refreshUnreadCount = async () => {
+          const { count } = await supabase
+            .from("notifications")
+            .select("*", { count: "exact", head: true })
+            .eq("user_id", user.id)
+            .eq("is_read", false);
+          setNotificationCount(count || 0);
+        };
+
+        await refreshUnreadCount();
+
+        // Fallback polling in case Realtime isn't enabled for this table.
+        intervalId = window.setInterval(() => {
+          refreshUnreadCount();
+        }, 15000);
+
+        // Keep unread count fresh when notifications are inserted/updated.
+        channel = supabase
+          .channel(`notifications-count-${user.id}`)
+          .on(
+            "postgres_changes",
+            { event: "*", schema: "public", table: "notifications", filter: `user_id=eq.${user.id}` },
+            () => {
+              refreshUnreadCount();
+            }
+          )
+          .subscribe();
       }
     };
     fetchProfile();
+
+    return () => {
+      if (intervalId) window.clearInterval(intervalId);
+      if (channel) supabase.removeChannel(channel);
+    };
   }, []);
 
   const handleSearch = (e: React.FormEvent) => {
@@ -95,7 +124,7 @@ export function TopBar({ showSearch = true, role }: TopBarProps) {
             variant="ghost"
             size="icon"
             className="relative text-muted-foreground hover:text-foreground"
-            onClick={() => navigate(`/${role}/dashboard`)}
+            onClick={() => navigate(`/${role}/alerts`)}
           >
             <Bell className="w-5 h-5" />
             {notificationCount > 0 && (

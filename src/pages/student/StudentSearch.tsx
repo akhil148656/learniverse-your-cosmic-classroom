@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Search, Loader2 } from "lucide-react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
@@ -17,31 +17,62 @@ export default function StudentSearch() {
   const [activeTopic, setActiveTopic] = useState(searchParams.get("q") || searchParams.get("topic") || "");
   const [isSearching, setIsSearching] = useState(false);
   const [showQuiz, setShowQuiz] = useState(false);
-  const { videos, isLoading: isLoadingVideos, searchVideos } = useYouTubeSearch();
+  const { videos, isLoading: isLoadingVideos, error: videoError, requiresSetup, searchVideos } = useYouTubeSearch();
+  const [studentGradeLevel, setStudentGradeLevel] = useState<number | null>(null);
+  const [studentPreferredLanguage, setStudentPreferredLanguage] = useState<string | null>(null);
+  const studentContextRef = useRef<{ id: string; grade_level: number | null; preferred_language: string | null } | null>(null);
+
+  const getStudentContext = useCallback(async () => {
+    if (studentContextRef.current) return studentContextRef.current;
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return null;
+
+    const resp = await supabase
+      .from("students")
+      .select("id, grade_level, preferred_language")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    let data = resp.data as any;
+    const err = resp.error as any;
+    if (err && typeof err.message === "string" && /preferred_language/i.test(err.message)) {
+      const retry = await supabase
+        .from("students")
+        .select("id, grade_level")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      data = retry.data as any;
+    }
+
+    if (!data) return null;
+    const ctx = {
+      id: data.id as string,
+      grade_level: (data.grade_level as number | null) ?? null,
+      preferred_language: (data.preferred_language as string | null) ?? null,
+    };
+    studentContextRef.current = ctx;
+    setStudentGradeLevel(typeof ctx.grade_level === "number" ? ctx.grade_level : null);
+    setStudentPreferredLanguage(typeof ctx.preferred_language === "string" ? ctx.preferred_language : null);
+    return ctx;
+  }, []);
 
   useEffect(() => {
     const initialTopic = searchParams.get("q") || searchParams.get("topic");
     if (initialTopic) {
       setQuery(initialTopic);
       setActiveTopic(initialTopic);
-      searchVideos(initialTopic);
-      saveSearchHistory(initialTopic);
+      getStudentContext().then((ctx) => {
+        searchVideos(initialTopic, ctx?.grade_level ?? null, ctx?.preferred_language ?? studentPreferredLanguage ?? null);
+        saveSearchHistory(initialTopic);
+      });
     }
   }, []);
 
   const saveSearchHistory = async (searchQuery: string) => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-
-    const { data: student } = await supabase
-      .from("students")
-      .select("id")
-      .eq("user_id", user.id)
-      .single();
-
-    if (student) {
+    const ctx = await getStudentContext();
+    if (ctx) {
       await supabase.from("search_history").insert({
-        student_id: student.id,
+        student_id: ctx.id,
         query: searchQuery,
       });
     }
@@ -54,7 +85,12 @@ export default function StudentSearch() {
     setIsSearching(true);
     setActiveTopic(query);
     setSearchParams({ q: query });
-    await searchVideos(query);
+    const ctx = await getStudentContext();
+    await searchVideos(
+      query,
+      ctx?.grade_level ?? studentGradeLevel ?? null,
+      ctx?.preferred_language ?? studentPreferredLanguage ?? null
+    );
     await saveSearchHistory(query);
     setIsSearching(false);
   };
@@ -93,7 +129,13 @@ export default function StudentSearch() {
         {activeTopic && (
           <div className="space-y-6">
             <AIGeneratedNotes topic={activeTopic} onQuizClick={() => setShowQuiz(true)} />
-            <YouTubeResults videos={videos} isLoading={isLoadingVideos} topic={activeTopic} />
+            <YouTubeResults
+              videos={videos}
+              isLoading={isLoadingVideos}
+              topic={activeTopic}
+              error={videoError}
+              requiresSetup={requiresSetup}
+            />
           </div>
         )}
 

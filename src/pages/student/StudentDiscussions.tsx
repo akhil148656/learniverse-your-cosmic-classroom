@@ -32,13 +32,48 @@ export default function StudentDiscussions() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSending, setIsSending] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
-  const [studentId, setStudentId] = useState<string | null>(null);
+  const [studentClassId, setStudentClassId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const senderNameCacheRef = useRef<Map<string, string>>(new Map());
+
+  const enrichMessagesWithSenderNames = async (rawMessages: Message[]) => {
+    const senderIds = Array.from(new Set(rawMessages.map((m) => m.sender_id)));
+    const missingSenderIds = senderIds.filter((id) => !senderNameCacheRef.current.has(id));
+
+    if (missingSenderIds.length > 0) {
+      const { data: profiles, error } = await supabase
+        .from("profiles")
+        .select("user_id, full_name")
+        .in("user_id", missingSenderIds);
+
+      if (error) {
+        // Don't block chat on profile lookup failures
+        missingSenderIds.forEach((id) => senderNameCacheRef.current.set(id, "Anonymous"));
+      } else {
+        (profiles || []).forEach((p) => {
+          senderNameCacheRef.current.set(p.user_id, p.full_name || "Anonymous");
+        });
+        missingSenderIds.forEach((id) => {
+          if (!senderNameCacheRef.current.has(id)) {
+            senderNameCacheRef.current.set(id, "Anonymous");
+          }
+        });
+      }
+    }
+
+    return rawMessages.map((m) => ({
+      ...m,
+      sender_name: senderNameCacheRef.current.get(m.sender_id) || "Anonymous",
+    }));
+  };
 
   useEffect(() => {
     const init = async () => {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      if (!user) {
+        setIsLoading(false);
+        return;
+      }
       setUserId(user.id);
 
       const { data: student } = await supabase
@@ -47,17 +82,30 @@ export default function StudentDiscussions() {
         .eq("user_id", user.id)
         .single();
 
-      if (student) {
-        setStudentId(student.id);
-        
-        // Fetch rooms for student's class
-        let query = supabase.from("discussion_rooms").select("*");
-        if (student.class_id) {
-          query = query.eq("class_id", student.class_id);
-        }
-        
-        const { data: roomsData } = await query;
+      if (!student?.class_id) {
+        setStudentClassId(null);
+        setRooms([]);
+        setSelectedRoom(null);
+        setIsLoading(false);
+        return;
+      }
+
+      setStudentClassId(student.class_id);
+
+      // Fetch rooms for student's class
+      const { data: roomsData, error: roomsError } = await supabase
+        .from("discussion_rooms")
+        .select("*")
+        .eq("class_id", student.class_id)
+        .order("created_at", { ascending: true });
+
+      if (roomsError) {
+        toast.error("Failed to load discussion rooms");
+        setRooms([]);
+        setSelectedRoom(null);
+      } else {
         setRooms(roomsData || []);
+        setSelectedRoom((roomsData && roomsData.length > 0) ? roomsData[0] : null);
       }
       
       setIsLoading(false);
@@ -70,24 +118,20 @@ export default function StudentDiscussions() {
     if (!selectedRoom) return;
 
     const fetchMessages = async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("discussion_messages")
         .select("*")
         .eq("room_id", selectedRoom.id)
         .order("created_at", { ascending: true });
 
+      if (error) {
+        toast.error("Failed to load messages");
+        setMessages([]);
+        return;
+      }
+
       if (data) {
-        // Enrich with sender names
-        const enriched = await Promise.all(
-          data.map(async (msg) => {
-            const { data: profile } = await supabase
-              .from("profiles")
-              .select("full_name")
-              .eq("user_id", msg.sender_id)
-              .single();
-            return { ...msg, sender_name: profile?.full_name || "Anonymous" };
-          })
-        );
+        const enriched = await enrichMessagesWithSenderNames(data as Message[]);
         setMessages(enriched);
       }
     };
@@ -107,12 +151,8 @@ export default function StudentDiscussions() {
         },
         async (payload) => {
           const newMsg = payload.new as Message;
-          const { data: profile } = await supabase
-            .from("profiles")
-            .select("full_name")
-            .eq("user_id", newMsg.sender_id)
-            .single();
-          setMessages((prev) => [...prev, { ...newMsg, sender_name: profile?.full_name || "Anonymous" }]);
+          const [enriched] = await enrichMessagesWithSenderNames([newMsg]);
+          setMessages((prev) => [...prev, enriched]);
         }
       )
       .subscribe();
@@ -151,17 +191,16 @@ export default function StudentDiscussions() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    const { data: student } = await supabase
-      .from("students")
-      .select("class_id")
-      .eq("user_id", user.id)
-      .single();
+    if (!studentClassId) {
+      toast.error("Join a class to access discussions");
+      return;
+    }
 
     const { data, error } = await supabase
       .from("discussion_rooms")
       .insert({
         name: `Study Room ${rooms.length + 1}`,
-        class_id: student?.class_id || null,
+        class_id: studentClassId,
       })
       .select()
       .single();
@@ -180,7 +219,9 @@ export default function StudentDiscussions() {
       <div className="space-y-6">
         <div>
           <h1 className="font-display text-3xl font-bold text-foreground">Discussion Rooms</h1>
-          <p className="text-muted-foreground">Chat with classmates and get help</p>
+          <p className="text-muted-foreground">
+            Chat with classmates, teachers, and everyone in the class so the whole learning circle can stay aligned.
+          </p>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
@@ -188,13 +229,17 @@ export default function StudentDiscussions() {
           <Card className="bg-card border-border lg:col-span-1">
             <CardHeader className="flex flex-row items-center justify-between pb-3">
               <CardTitle className="font-display text-lg">Rooms</CardTitle>
-              <Button size="sm" onClick={createRoom} className="bg-primary hover:bg-primary/90">
+              <Button size="sm" onClick={createRoom} className="bg-primary hover:bg-primary/90" disabled={!studentClassId}>
                 + New
               </Button>
             </CardHeader>
             <CardContent>
               {isLoading ? (
                 <div className="text-center py-4 text-muted-foreground">Loading...</div>
+              ) : !studentClassId ? (
+                <p className="text-sm text-muted-foreground text-center py-4">
+                  Join a class to access discussions.
+                </p>
               ) : rooms.length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-4">No rooms yet</p>
               ) : (
@@ -294,6 +339,7 @@ export default function StudentDiscussions() {
               </>
             )}
           </Card>
+
         </div>
       </div>
     </PortalLayout>

@@ -13,6 +13,7 @@ import {
   BookOpen,
   Bell,
   Settings,
+  User,
   Home,
   Baby,
   Brain,
@@ -44,7 +45,7 @@ const studentNavItems: NavItem[] = [
   { title: "Quizzes", url: "/student/quizzes", icon: HelpCircle },
   { title: "Virtual Labs", url: "/student/virtual-labs", icon: FlaskConical },
   { title: "Discussions", url: "/student/discussions", icon: MessageSquare },
-  { title: "AI Mentor", url: "/student/ai-mentor", icon: Bot },
+  { title: "Profile", url: "/student/profile", icon: User },
 ];
 
 const teacherNavItems: NavItem[] = [
@@ -60,7 +61,6 @@ const parentNavItems: NavItem[] = [
   { title: "Dashboard", url: "/parent/dashboard", icon: LayoutDashboard },
   { title: "Child Progress", url: "/parent/child-progress", icon: Baby },
   { title: "AI Feedback", url: "/parent/ai-feedback", icon: Brain },
-  { title: "Alerts", url: "/parent/alerts", icon: Bell },
 ];
 
 interface AppSidebarProps {

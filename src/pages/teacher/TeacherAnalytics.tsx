@@ -50,7 +50,10 @@ export default function TeacherAnalytics() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      let studentsQuery = supabase.from("students").select("*, profiles!inner(full_name)");
+      // Do NOT join `students -> profiles` via PostgREST.
+      // There is no FK relationship between these tables (both reference auth.users via user_id),
+      // so a relationship join can fail with: "Could not find a relationship... in the schema cache".
+      let studentsQuery = supabase.from("students").select("id, user_id, class_id, xp_points, focus_score");
 
       if (selectedClass !== "all") {
         studentsQuery = studentsQuery.eq("class_id", selectedClass);
@@ -61,13 +64,35 @@ export default function TeacherAnalytics() {
         }
       }
 
-      const { data: students } = await studentsQuery;
+      const { data: students, error: studentsError } = await studentsQuery;
+
+      if (studentsError) {
+        console.error("Failed to load students for analytics", studentsError);
+        setAnalytics(null);
+        setIsLoading(false);
+        return;
+      }
 
       if (!students || students.length === 0) {
         setAnalytics(null);
         setIsLoading(false);
         return;
       }
+
+      const userIds = Array.from(new Set((students || []).map((s: any) => s.user_id).filter(Boolean))) as string[];
+      const { data: profiles, error: profilesError } = userIds.length
+        ? await supabase.from("profiles").select("user_id, full_name").in("user_id", userIds)
+        : { data: [], error: null };
+
+      if (profilesError) {
+        // Names are non-critical; analytics can still show.
+        console.warn("Could not load student profiles (names)", profilesError);
+      }
+
+      const nameByUserId = new Map<string, string>();
+      (profiles || []).forEach((p: any) => {
+        if (p?.user_id) nameByUserId.set(p.user_id, p.full_name || "Unknown");
+      });
 
       // Calculate analytics
       const totalStudents = students.length;
@@ -91,13 +116,13 @@ export default function TeacherAnalytics() {
       const topPerformers = students
         .sort((a, b) => (b.xp_points || 0) - (a.xp_points || 0))
         .slice(0, 5)
-        .map((s) => ({ name: (s.profiles as any)?.full_name || "Unknown", xp: s.xp_points || 0 }));
+        .map((s: any) => ({ name: nameByUserId.get(s.user_id) || "Unknown", xp: s.xp_points || 0 }));
 
       // Needs attention (low focus score)
       const needsAttention = students
         .filter((s) => (s.focus_score || 100) < 70)
         .slice(0, 5)
-        .map((s) => ({ name: (s.profiles as any)?.full_name || "Unknown", focusScore: s.focus_score || 0 }));
+        .map((s: any) => ({ name: nameByUserId.get(s.user_id) || "Unknown", focusScore: s.focus_score || 0 }));
 
       setAnalytics({
         totalStudents,

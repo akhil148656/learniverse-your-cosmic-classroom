@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { StarField } from "@/components/ui/StarField";
+import { ToastAction } from "@/components/ui/toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 
@@ -20,14 +21,42 @@ export default function TeacherLogin() {
     fullName: "",
   });
 
+  const normalizeEmail = (email: string) => email.trim().toLowerCase();
+
+  const resendSignupConfirmation = async (email: string) => {
+    try {
+      const { error } = await supabase.auth.resend({
+        type: "signup",
+        email,
+        options: {
+          emailRedirectTo: `${window.location.origin}/teacher/dashboard`,
+        },
+      });
+
+      if (error) throw error;
+
+      toast({
+        title: "Email sent",
+        description: "Check your inbox (and spam folder) to confirm your email.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error?.message || "Failed to resend confirmation email",
+        variant: "destructive",
+      });
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
 
     try {
       if (isSignUp) {
+        const email = normalizeEmail(formData.email);
         const { data, error } = await supabase.auth.signUp({
-          email: formData.email,
+          email,
           password: formData.password,
           options: {
             emailRedirectTo: `${window.location.origin}/teacher/dashboard`,
@@ -40,21 +69,24 @@ export default function TeacherLogin() {
 
         if (error) throw error;
 
-        if (data.user) {
-          await supabase.from("user_roles").insert({
-            user_id: data.user.id,
-            role: "teacher",
-          });
-
+        if (!data.session) {
           toast({
-            title: "Account created!",
-            description: "Redirecting to dashboard...",
+            title: "Check your email",
+            description: "Confirm your email, then log in to continue.",
           });
-          navigate("/teacher/dashboard");
+          setIsSignUp(false);
+          return;
         }
+
+        toast({
+          title: "Account created!",
+          description: "Redirecting to dashboard...",
+        });
+        navigate("/teacher/dashboard");
       } else {
+        const email = normalizeEmail(formData.email);
         const { error } = await supabase.auth.signInWithPassword({
-          email: formData.email,
+          email,
           password: formData.password,
         });
 
@@ -67,10 +99,22 @@ export default function TeacherLogin() {
         navigate("/teacher/dashboard");
       }
     } catch (error: any) {
+      const message = String(error?.message || "Something went wrong");
+      const email = normalizeEmail(formData.email);
+      const showResend =
+        !!email && (/invalid login credentials/i.test(message) || /email not confirmed/i.test(message));
       toast({
         title: "Error",
-        description: error.message || "Something went wrong",
+        description:
+          /invalid login credentials/i.test(message)
+            ? "Invalid email or password. If you just signed up, confirm your email first."
+            : message,
         variant: "destructive",
+        action: showResend ? (
+          <ToastAction altText="Resend confirmation email" onClick={() => resendSignupConfirmation(email)}>
+            Resend email
+          </ToastAction>
+        ) : undefined,
       });
     } finally {
       setIsLoading(false);

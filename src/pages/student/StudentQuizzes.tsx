@@ -79,32 +79,8 @@ export default function StudentQuizzes() {
 
     setIsGenerating(true);
     setCurrentTopic(topicInput);
-    
-    try {
-      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-quiz`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-        },
-        body: JSON.stringify({ 
-          topic: topicInput,
-          difficulty: "medium",
-          questionCount: 5,
-          gradeLevel: 10,
-        }),
-      });
 
-      if (!response.ok) {
-        throw new Error("Failed to generate quiz");
-      }
-
-      setShowQuiz(true);
-      toast.success("Quiz generated! Let's test your knowledge.");
-    } catch (error) {
-      console.error("Error generating quiz:", error);
-      toast.error("Failed to generate quiz. Please try again.");
-    }
+    setShowQuiz(true);
     setIsGenerating(false);
   };
 
@@ -239,7 +215,12 @@ export default function StudentQuizzes() {
           </CardContent>
         </Card>
 
-        <QuizModal isOpen={showQuiz} onClose={() => setShowQuiz(false)} topic={currentTopic} />
+        <QuizModal
+          isOpen={showQuiz}
+          onClose={() => setShowQuiz(false)}
+          topic={currentTopic}
+          onCompleted={fetchQuizAttempts}
+        />
       </div>
     </PortalLayout>
   );

@@ -335,6 +335,7 @@ export type Database = {
           created_at: string
           email: string | null
           full_name: string | null
+          gender: string | null
           id: string
           phone: string | null
           updated_at: string
@@ -345,6 +346,7 @@ export type Database = {
           created_at?: string
           email?: string | null
           full_name?: string | null
+          gender?: string | null
           id?: string
           phone?: string | null
           updated_at?: string
@@ -355,6 +357,7 @@ export type Database = {
           created_at?: string
           email?: string | null
           full_name?: string | null
+          gender?: string | null
           id?: string
           phone?: string | null
           updated_at?: string
@@ -612,6 +615,9 @@ export type Database = {
           score: number | null
           status: string | null
           student_id: string
+          submission_attachment_mime: string | null
+          submission_attachment_name: string | null
+          submission_attachment_path: string | null
           submission_text: string | null
           submitted_at: string | null
           teacher_feedback: string | null
@@ -624,6 +630,9 @@ export type Database = {
           score?: number | null
           status?: string | null
           student_id: string
+          submission_attachment_mime?: string | null
+          submission_attachment_name?: string | null
+          submission_attachment_path?: string | null
           submission_text?: string | null
           submitted_at?: string | null
           teacher_feedback?: string | null
@@ -636,6 +645,9 @@ export type Database = {
           score?: number | null
           status?: string | null
           student_id?: string
+          submission_attachment_mime?: string | null
+          submission_attachment_name?: string | null
+          submission_attachment_path?: string | null
           submission_text?: string | null
           submitted_at?: string | null
           teacher_feedback?: string | null
@@ -707,9 +719,12 @@ export type Database = {
           class_id: string | null
           created_at: string
           focus_score: number | null
+          gender: string | null
           grade_level: number | null
           id: string
           learning_mode: string | null
+          preferred_language: string | null
+          student_code: string
           updated_at: string
           user_id: string
           xp_points: number | null
@@ -718,9 +733,12 @@ export type Database = {
           class_id?: string | null
           created_at?: string
           focus_score?: number | null
+          gender?: string | null
           grade_level?: number | null
           id?: string
           learning_mode?: string | null
+          preferred_language?: string | null
+          student_code?: string
           updated_at?: string
           user_id: string
           xp_points?: number | null
@@ -729,9 +747,12 @@ export type Database = {
           class_id?: string | null
           created_at?: string
           focus_score?: number | null
+          gender?: string | null
           grade_level?: number | null
           id?: string
           learning_mode?: string | null
+          preferred_language?: string | null
+          student_code?: string
           updated_at?: string
           user_id?: string
           xp_points?: number | null
@@ -807,6 +828,48 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      notes: {
+        Row: {
+          color: string | null
+          content: string
+          created_at: string
+          id: string
+          is_pinned: boolean | null
+          note_type: string
+          related_id: string | null
+          tags: string[] | null
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          color?: string | null
+          content: string
+          created_at?: string
+          id?: string
+          is_pinned?: boolean | null
+          note_type: string
+          related_id?: string | null
+          tags?: string[] | null
+          title: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          color?: string | null
+          content?: string
+          created_at?: string
+          id?: string
+          is_pinned?: boolean | null
+          note_type?: string
+          related_id?: string | null
+          tags?: string[] | null
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       user_roles: {
         Row: {
@@ -888,6 +951,35 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      find_student_by_code: {
+        Args: { _student_code: string }
+        Returns: {
+          class_id: string | null
+          full_name: string | null
+          grade_level: number | null
+          student_id: string
+        }[]
+      }
+      parent_link_student_by_code: {
+        Args: { _student_code: string }
+        Returns: string
+      }
+      teacher_add_student_to_class_by_code: {
+        Args: { _class_id: string; _student_code: string }
+        Returns: string
+      }
+      find_class_by_code: {
+        Args: { _code: string }
+        Returns: {
+          grade_level: number | null
+          id: string
+          name: string
+        }[]
+      }
+      student_join_class_by_code: {
+        Args: { _code: string }
+        Returns: string
+      }
       get_student_performance_summary: {
         Args: { student_uuid: string }
         Returns: {

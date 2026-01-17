@@ -14,6 +14,8 @@ interface AssignmentData {
   id: string;
   status: string;
   submission_text: string | null;
+  submission_attachment_path?: string | null;
+  submission_attachment_name?: string | null;
   score: number | null;
   teacher_feedback: string | null;
   submitted_at: string | null;
@@ -33,7 +35,22 @@ export default function StudentAssignments() {
   const [isLoading, setIsLoading] = useState(true);
   const [submitting, setSubmitting] = useState<string | null>(null);
   const [submissionText, setSubmissionText] = useState<Record<string, string>>({});
+  const [submissionFile, setSubmissionFile] = useState<Record<string, File | null>>({});
   const [studentClassId, setStudentClassId] = useState<string | null>(null);
+
+  const SUBMISSIONS_BUCKET = "assignment-submissions";
+
+  const openAttachment = async (path: string) => {
+    const { data, error } = await supabase.storage
+      .from(SUBMISSIONS_BUCKET)
+      .createSignedUrl(path, 60 * 10);
+    if (error || !data?.signedUrl) {
+      console.error("Failed to create signed URL", error);
+      toast.error("Failed to open attachment");
+      return;
+    }
+    window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+  };
 
   useEffect(() => {
     fetchAssignments();
@@ -78,6 +95,8 @@ export default function StudentAssignments() {
         id: d.id,
         status: d.status,
         submission_text: d.submission_text,
+        submission_attachment_path: d.submission_attachment_path,
+        submission_attachment_name: d.submission_attachment_name,
         score: d.score,
         teacher_feedback: d.teacher_feedback,
         submitted_at: d.submitted_at,
@@ -91,25 +110,58 @@ export default function StudentAssignments() {
 
   const submitAssignment = async (studentAssignmentId: string) => {
     const text = submissionText[studentAssignmentId];
-    if (!text?.trim()) {
-      toast.error("Please enter your submission");
+    const file = submissionFile[studentAssignmentId] || null;
+    if (!text?.trim() && !file) {
+      toast.error("Add a message or attach a file");
       return;
     }
 
     setSubmitting(studentAssignmentId);
+    let attachmentPath: string | null = null;
+    let attachmentName: string | null = null;
+    let attachmentMime: string | null = null;
+
+    if (file) {
+      attachmentName = file.name;
+      attachmentMime = file.type || null;
+      attachmentPath = `${studentAssignmentId}/${Date.now()}_${file.name}`;
+      const { error: uploadError } = await supabase.storage
+        .from(SUBMISSIONS_BUCKET)
+        // We generate a unique filename, so we don't need upsert (and it can require extra UPDATE privileges).
+        .upload(attachmentPath, file, { upsert: false, contentType: file.type || undefined });
+
+      if (uploadError) {
+        console.error("Upload failed", uploadError);
+        const details =
+          (uploadError as any)?.message ||
+          (uploadError as any)?.error_description ||
+          (uploadError as any)?.statusCode ||
+          "Unknown error";
+        toast.error(`Failed to upload attachment: ${details}`);
+        setSubmitting(null);
+        return;
+      }
+    }
+
     const { error } = await supabase
       .from("student_assignments")
       .update({
         submission_text: text,
         status: "submitted",
         submitted_at: new Date().toISOString(),
+        submission_attachment_path: attachmentPath,
+        submission_attachment_name: attachmentName,
+        submission_attachment_mime: attachmentMime,
       })
       .eq("id", studentAssignmentId);
 
     if (error) {
-      toast.error("Failed to submit assignment");
+      const msg = error.message || "Failed to submit assignment";
+      console.error("Submit assignment failed", error);
+      toast.error(msg);
     } else {
       toast.success("Assignment submitted!");
+      setSubmissionFile((prev) => ({ ...prev, [studentAssignmentId]: null }));
       fetchAssignments();
     }
     setSubmitting(null);
@@ -117,7 +169,7 @@ export default function StudentAssignments() {
 
   const pending = assignments.filter((a) => a.status === "pending");
   const submitted = assignments.filter((a) => a.status === "submitted");
-  const graded = assignments.filter((a) => a.status === "graded");
+  const graded = assignments.filter((a) => a.status === "reviewed");
 
   const isOverdue = (dueDate: string | null) => {
     if (!dueDate) return false;
@@ -155,6 +207,24 @@ export default function StudentAssignments() {
               onChange={(e) => setSubmissionText({ ...submissionText, [a.id]: e.target.value })}
               className="bg-muted border-border min-h-[120px]"
             />
+
+            <div className="space-y-2">
+              <p className="text-sm text-muted-foreground">Attachment (optional)</p>
+              <input
+                type="file"
+                className="block w-full text-sm text-muted-foreground file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-muted file:text-foreground hover:file:bg-muted/80"
+                onChange={(e) =>
+                  setSubmissionFile({
+                    ...submissionFile,
+                    [a.id]: e.target.files?.[0] || null,
+                  })
+                }
+              />
+              {submissionFile[a.id]?.name && (
+                <p className="text-xs text-muted-foreground truncate">Selected: {submissionFile[a.id]!.name}</p>
+              )}
+            </div>
+
             <Button
               onClick={() => submitAssignment(a.id)}
               disabled={submitting === a.id}
@@ -177,7 +247,18 @@ export default function StudentAssignments() {
           </div>
         )}
 
-        {a.status === "graded" && (
+        {a.submission_attachment_path && (
+          <div className="flex items-center justify-between rounded-lg bg-muted/30 border border-border p-3">
+            <div className="text-sm text-muted-foreground truncate">
+              Attachment: <span className="text-foreground">{a.submission_attachment_name || "file"}</span>
+            </div>
+            <Button variant="outline" onClick={() => openAttachment(a.submission_attachment_path!)}>
+              View
+            </Button>
+          </div>
+        )}
+
+        {a.status === "reviewed" && (
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-muted-foreground">Score:</span>

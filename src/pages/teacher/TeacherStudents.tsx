@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Users, Mail, Trophy, Brain, Search } from "lucide-react";
+import { Users, Trophy, Brain, Search, UserPlus, Copy } from "lucide-react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -8,10 +8,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { EmptyState } from "@/components/cards/EmptyState";
 import { supabase } from "@/integrations/supabase/client";
+import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 
 interface StudentData {
   id: string;
   user_id: string;
+  student_code?: string;
   xp_points: number | null;
   focus_score: number | null;
   grade_level: number | null;
@@ -37,6 +40,96 @@ export default function TeacherStudents() {
   const [selectedClass, setSelectedClass] = useState<string>(searchParams.get("class") || "all");
   const [searchQuery, setSearchQuery] = useState("");
   const [isLoading, setIsLoading] = useState(true);
+  const [addStudentCode, setAddStudentCode] = useState("");
+  const [isAddingStudent, setIsAddingStudent] = useState(false);
+
+  const fetchStudents = useCallback(async () => {
+    setIsLoading(true);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    let query = supabase.from("students").select("*");
+
+    if (selectedClass !== "all") {
+      query = query.eq("class_id", selectedClass);
+    } else {
+      const classIds = classes.map((c) => c.id);
+      if (classIds.length > 0) {
+        query = query.in("class_id", classIds);
+      }
+    }
+
+    const { data: studentsData, error: studentsError } = await query;
+
+    if (studentsError) {
+      console.error("Error loading students:", studentsError);
+      toast.error("Failed to load students");
+      setStudents([]);
+      setIsLoading(false);
+      return;
+    }
+
+    if (!studentsData || studentsData.length === 0) {
+      setStudents([]);
+      setIsLoading(false);
+      return;
+    }
+
+    const userIds = Array.from(
+      new Set(
+        studentsData
+          .map((s) => s.user_id)
+          .filter((id): id is string => typeof id === "string" && id.length > 0)
+      )
+    );
+    const studentIds = studentsData.map((s) => s.id);
+
+    const [profilesRes, analyticsRes] = await Promise.all([
+      userIds.length
+        ? supabase
+            .from("profiles")
+            .select("user_id, full_name, email")
+            .in("user_id", userIds)
+        : Promise.resolve({ data: [], error: null } as any),
+      studentIds.length
+        ? supabase
+            .from("student_analytics")
+            .select("student_id, topics_completed, quizzes_passed")
+            .in("student_id", studentIds)
+        : Promise.resolve({ data: [], error: null } as any),
+    ]);
+
+    if (profilesRes.error) {
+      console.error("Error loading student profiles:", profilesRes.error);
+      toast.error("Can't load student names (profile access blocked)");
+    }
+    if (analyticsRes.error) {
+      console.error("Error loading student analytics:", analyticsRes.error);
+    }
+
+    const profilesByUserId = new Map<string, { full_name: string | null; email: string | null }>(
+      (profilesRes.data || []).map((p: any) => [p.user_id as string, { full_name: p.full_name ?? null, email: p.email ?? null }])
+    );
+    const analyticsByStudentId = new Map<string, { topics_completed: number; quizzes_passed: number }>(
+      (analyticsRes.data || []).map((a: any) => [
+        a.student_id as string,
+        {
+          topics_completed: Number(a.topics_completed ?? 0),
+          quizzes_passed: Number(a.quizzes_passed ?? 0),
+        },
+      ])
+    );
+
+    const enrichedStudents = studentsData.map((student) => {
+      const profile = profilesByUserId.get(student.user_id) ?? { full_name: null, email: null };
+      const analytics = analyticsByStudentId.get(student.id) ?? { topics_completed: 0, quizzes_passed: 0 };
+      return { ...student, profile, analytics };
+    });
+
+    setStudents(enrichedStudents);
+
+    setIsLoading(false);
+  }, [classes, selectedClass]);
 
   useEffect(() => {
     const fetchClasses = async () => {
@@ -55,25 +148,74 @@ export default function TeacherStudents() {
   }, []);
 
   useEffect(() => {
-    const fetchStudents = async () => {
-      setIsLoading(true);
+    if (classes.length > 0 || selectedClass === "all") {
+      fetchStudents();
+    }
+  }, [fetchStudents, selectedClass, classes.length]);
+
+  useEffect(() => {
+    // If a teacher has this page open while a student joins, refresh automatically.
+    const classIds = classes.map((c) => c.id).filter(Boolean);
+    if (classIds.length === 0) return;
+
+    const channels = classIds.map((classId) =>
+      supabase
+        .channel(`teacher-students-${classId}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "students",
+            filter: `class_id=eq.${classId}`,
+          },
+          () => {
+            fetchStudents();
+          }
+        )
+        .subscribe()
+    );
+
+    return () => {
+      channels.forEach((ch) => supabase.removeChannel(ch));
+    };
+  }, [classes, fetchStudents]);
+
+  const filteredStudents = students.filter((s) =>
+    (s.profile?.full_name?.toLowerCase() || "").includes(searchQuery.toLowerCase()) ||
+    (s.profile?.email?.toLowerCase() || "").includes(searchQuery.toLowerCase())
+  );
+
+  const addStudentToSelectedClass = async () => {
+    if (selectedClass === "all") {
+      toast.error("Select a class first");
+      return;
+    }
+    if (!addStudentCode.trim()) {
+      toast.error("Enter a student ID");
+      return;
+    }
+
+    setIsAddingStudent(true);
+    try {
+      const { error } = await supabase.rpc("teacher_add_student_to_class_by_code", {
+        _class_id: selectedClass,
+        _student_code: addStudentCode.trim().toUpperCase(),
+      });
+      if (error) {
+        toast.error(error.message);
+        return;
+      }
+      toast.success("Student added to class");
+      setAddStudentCode("");
+
+      // Refresh list
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-
-      let query = supabase.from("students").select("*");
-
-      if (selectedClass !== "all") {
-        query = query.eq("class_id", selectedClass);
-      } else {
-        // Get all students from teacher's classes
-        const classIds = classes.map(c => c.id);
-        if (classIds.length > 0) {
-          query = query.in("class_id", classIds);
-        }
-      }
-
-      const { data: studentsData } = await query;
-
+      const { data: studentsData } = await supabase
+        .from("students")
+        .select("*")
+        .eq("class_id", selectedClass);
       if (studentsData) {
         const enrichedStudents = await Promise.all(
           studentsData.map(async (student) => {
@@ -96,22 +238,12 @@ export default function TeacherStudents() {
             };
           })
         );
-
         setStudents(enrichedStudents);
       }
-
-      setIsLoading(false);
-    };
-
-    if (classes.length > 0 || selectedClass === "all") {
-      fetchStudents();
+    } finally {
+      setIsAddingStudent(false);
     }
-  }, [selectedClass, classes]);
-
-  const filteredStudents = students.filter((s) =>
-    (s.profile?.full_name?.toLowerCase() || "").includes(searchQuery.toLowerCase()) ||
-    (s.profile?.email?.toLowerCase() || "").includes(searchQuery.toLowerCase())
-  );
+  };
 
   return (
     <PortalLayout role="teacher">
@@ -144,6 +276,32 @@ export default function TeacherStudents() {
           </Select>
         </div>
 
+        {selectedClass !== "all" && (
+          <Card className="bg-card border-border">
+            <CardHeader className="pb-3">
+              <CardTitle className="font-display text-lg flex items-center gap-2">
+                <UserPlus className="w-5 h-5 text-primary" />
+                Add Student to Class
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="flex gap-3 flex-wrap">
+              <Input
+                placeholder="Enter Student ID (e.g., STU-XXXXXXXXXX)"
+                value={addStudentCode}
+                onChange={(e) => setAddStudentCode(e.target.value)}
+                className="bg-muted border-border flex-1 min-w-[240px]"
+              />
+              <Button
+                onClick={addStudentToSelectedClass}
+                disabled={isAddingStudent}
+                className="bg-primary hover:bg-primary/90"
+              >
+                {isAddingStudent ? "Adding..." : "Add"}
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
         <Card className="bg-card border-border">
           <CardHeader>
             <CardTitle className="font-display text-lg flex items-center gap-2">
@@ -166,6 +324,7 @@ export default function TeacherStudents() {
                   <TableRow className="border-border">
                     <TableHead className="text-muted-foreground">Name</TableHead>
                     <TableHead className="text-muted-foreground">Email</TableHead>
+                    <TableHead className="text-muted-foreground">Student ID</TableHead>
                     <TableHead className="text-muted-foreground">Grade</TableHead>
                     <TableHead className="text-muted-foreground">XP</TableHead>
                     <TableHead className="text-muted-foreground">Focus</TableHead>
@@ -181,6 +340,22 @@ export default function TeacherStudents() {
                       </TableCell>
                       <TableCell className="text-muted-foreground">
                         {student.profile?.email || "-"}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {student.student_code ? (
+                          <button
+                            className="inline-flex items-center gap-2 hover:text-foreground"
+                            onClick={() => {
+                              navigator.clipboard.writeText(student.student_code!);
+                              toast.success("Student ID copied");
+                            }}
+                          >
+                            <Copy className="w-3 h-3" />
+                            <span className="font-mono text-xs">{student.student_code}</span>
+                          </button>
+                        ) : (
+                          "-"
+                        )}
                       </TableCell>
                       <TableCell className="text-muted-foreground">
                         {student.grade_level || "-"}

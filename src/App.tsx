@@ -16,12 +16,15 @@ import StudentAIMentor from "./pages/student/StudentAIMentor";
 import StudentDiscussions from "./pages/student/StudentDiscussions";
 import StudentAssignments from "./pages/student/StudentAssignments";
 import StudentQuizzes from "./pages/student/StudentQuizzes";
+import StudentAlerts from "./pages/student/StudentAlerts";
+import StudentSettings from "./pages/student/StudentSettings";
 import TeacherClasses from "./pages/teacher/TeacherClasses";
 import TeacherStudents from "./pages/teacher/TeacherStudents";
 import TeacherAssignments from "./pages/teacher/TeacherAssignments";
 import TeacherAnalytics from "./pages/teacher/TeacherAnalytics";
 import TeacherFeedback from "./pages/teacher/TeacherFeedback";
 import TeacherGrading from "./pages/teacher/TeacherGrading";
+import TeacherAlerts from "./pages/teacher/TeacherAlerts";
 import { TeacherDashboard } from "./pages/teacher/TeacherPages";
 import { ParentDashboard, ParentChildProgress, ParentAIFeedback, ParentAlerts } from "./pages/parent/ParentPages";
 
@@ -43,9 +46,12 @@ const App = () => (
           <Route path="/student/search" element={<StudentSearch />} />
           <Route path="/student/assignments" element={<StudentAssignments />} />
           <Route path="/student/quizzes" element={<StudentQuizzes />} />
+          <Route path="/student/alerts" element={<StudentAlerts />} />
           <Route path="/student/virtual-labs" element={<StudentVirtualLabs />} />
           <Route path="/student/discussions" element={<StudentDiscussions />} />
           <Route path="/student/ai-mentor" element={<StudentAIMentor />} />
+          <Route path="/student/settings" element={<StudentSettings />} />
+          <Route path="/student/profile" element={<StudentSettings />} />
           <Route path="/teacher/dashboard" element={<TeacherDashboard />} />
           <Route path="/teacher/classes" element={<TeacherClasses />} />
           <Route path="/teacher/students" element={<TeacherStudents />} />
@@ -53,6 +59,7 @@ const App = () => (
           <Route path="/teacher/analytics" element={<TeacherAnalytics />} />
           <Route path="/teacher/feedback" element={<TeacherFeedback />} />
           <Route path="/teacher/grading" element={<TeacherGrading />} />
+          <Route path="/teacher/alerts" element={<TeacherAlerts />} />
           <Route path="/parent/dashboard" element={<ParentDashboard />} />
           <Route path="/parent/child-progress" element={<ParentChildProgress />} />
           <Route path="/parent/ai-feedback" element={<ParentAIFeedback />} />

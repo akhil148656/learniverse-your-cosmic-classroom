@@ -58,7 +58,8 @@ export default function TeacherFeedback() {
       if (!user) return;
 
       // Fetch students
-      let studentsQuery = supabase.from("students").select("id, user_id, xp_points, focus_score, profiles!inner(full_name)");
+      // Do NOT join `students -> profiles` via PostgREST (no FK relationship).
+      let studentsQuery = supabase.from("students").select("id, user_id, xp_points, focus_score, class_id");
 
       if (selectedClass !== "all") {
         studentsQuery = studentsQuery.eq("class_id", selectedClass);
@@ -69,11 +70,33 @@ export default function TeacherFeedback() {
         }
       }
 
-      const { data: studentsData } = await studentsQuery;
+      const { data: studentsData, error: studentsError } = await studentsQuery;
+      if (studentsError) {
+        console.error("Failed to load students", studentsError);
+        toast.error(studentsError.message);
+        setStudents([]);
+        setFeedbackList([]);
+        setIsLoading(false);
+        return;
+      }
+
+      const userIds = Array.from(new Set((studentsData || []).map((s: any) => s.user_id).filter(Boolean))) as string[];
+      const { data: profiles, error: profilesError } = userIds.length
+        ? await supabase.from("profiles").select("user_id, full_name").in("user_id", userIds)
+        : { data: [], error: null };
+      if (profilesError) {
+        console.warn("Could not load student names", profilesError);
+      }
+
+      const nameByUserId = new Map<string, string>();
+      (profiles || []).forEach((p: any) => {
+        if (p?.user_id) nameByUserId.set(p.user_id, p.full_name || "Unknown");
+      });
+
       const formattedStudents = (studentsData || []).map((s: any) => ({
         id: s.id,
         user_id: s.user_id,
-        profile_name: s.profiles?.full_name || "Unknown",
+        profile_name: nameByUserId.get(s.user_id) || "Unknown",
         xp_points: s.xp_points,
         focus_score: s.focus_score,
       }));
@@ -110,17 +133,21 @@ export default function TeacherFeedback() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
           Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
         },
         body: JSON.stringify({ studentId }),
       });
 
       if (!response.ok) {
-        throw new Error("Failed to generate feedback");
+        const errorText = await response.text().catch(() => "");
+        throw new Error(errorText || `Failed to generate feedback (HTTP ${response.status})`);
       }
 
       const data = await response.json();
-      toast.success("AI feedback generated successfully!");
+      const provider = typeof data?.provider === "string" ? data.provider : null;
+      const model = typeof data?.model === "string" ? data.model : null;
+      toast.success(provider ? `AI feedback generated (${provider}${model ? `: ${model}` : ""})` : "AI feedback generated successfully!");
       
       // Add to feedback list
       const student = students.find((s) => s.id === studentId);
@@ -136,7 +163,18 @@ export default function TeacherFeedback() {
       ]);
     } catch (error) {
       console.error("Error generating feedback:", error);
-      toast.error("Failed to generate feedback");
+      const raw = error instanceof Error ? error.message : String(error);
+      if (/models\/gemini-1\.5-flash\s+is\s+not\s+found/i.test(raw)) {
+        toast.error(
+          "AI model not found. In Supabase Edge Function env vars, set GEMINI_MODEL=gemini-1.5-flash-001 (or remove GEMINI_MODEL)."
+        );
+      } else if (/GEMINI_API_KEY/i.test(raw)) {
+        toast.error("AI not configured. Add GEMINI_API_KEY in Supabase Edge Function secrets.");
+      } else if (/SUPABASE_SERVICE_ROLE_KEY|service role/i.test(raw)) {
+        toast.error("Backend missing SUPABASE_SERVICE_ROLE_KEY for this function.");
+      } else {
+        toast.error("Failed to generate feedback");
+      }
     }
     setGeneratingFor(null);
   };
