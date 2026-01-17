@@ -40,7 +40,7 @@ interface NavItem {
 
 const studentNavItems: NavItem[] = [
   { title: "Dashboard", url: "/student/dashboard", icon: LayoutDashboard },
-  { title: "Learn / Search", url: "/student/search", icon: Search },
+  { title: "Search and Learn", url: "/student/search", icon: Search },
   { title: "Assignments", url: "/student/assignments", icon: FileText },
   { title: "Quizzes", url: "/student/quizzes", icon: HelpCircle },
   { title: "Virtual Labs", url: "/student/virtual-labs", icon: FlaskConical },
