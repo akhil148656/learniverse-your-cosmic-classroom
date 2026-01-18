@@ -1,4 +1,4 @@
-<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/b3e31345-f07e-4107-97f8-df1de2ca300c" /># Welcome to Learniverse project
+< #Welcome to Learniverse project
 
 ## Project info
 
