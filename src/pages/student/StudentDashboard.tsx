@@ -84,13 +84,16 @@ export default function StudentDashboard() {
         .limit(5);
       setSuggestions(suggestionsData || []);
 
-      const { data: assignmentsData } = await supabase
-        .from("student_assignments")
-        .select("*, assignments(title, due_date)")
-        .eq("student_id", studentData.id)
-        .eq("status", "pending")
-        .order("due_date", { ascending: true, foreignTable: "assignments" })
-        .limit(6);
+      const { data: assignmentsData } = studentData.class_id
+        ? await supabase
+            .from("student_assignments")
+            .select("*, assignments!inner(title, due_date, class_id)")
+            .eq("student_id", studentData.id)
+            .eq("status", "pending")
+            .eq("assignments.class_id", studentData.class_id)
+            .order("due_date", { ascending: true, foreignTable: "assignments" })
+            .limit(6)
+        : { data: [] as any[] };
       setAssignments(assignmentsData || []);
     } finally {
       setIsLoading(false);

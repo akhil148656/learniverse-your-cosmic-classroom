@@ -84,38 +84,32 @@ export default function StudentAssignments() {
       className = classData?.name;
     }
 
+    if (!student.class_id) {
+      setAssignments([]);
+      setIsLoading(false);
+      return;
+    }
+
     const { data } = await supabase
       .from("student_assignments")
-      .select("*, assignments(*)")
+      .select("*, assignments!inner(*)")
       .eq("student_id", student.id)
+      .eq("assignments.class_id", student.class_id)
       .order("created_at", { ascending: false });
 
     if (data) {
-      const formatted = data.flatMap((d: any) => {
-        const embeddedAssignment = d.assignments ?? d.assignment ?? null;
-        if (!embeddedAssignment) return [];
-
-        return [
-          {
-            id: d.id,
-            status: d.status,
-            submission_text: d.submission_text,
-            submission_attachment_path: d.submission_attachment_path,
-            submission_attachment_name: d.submission_attachment_name,
-            score: d.score,
-            teacher_feedback: d.teacher_feedback,
-            submitted_at: d.submitted_at,
-            assignment: embeddedAssignment,
-            class_name: className,
-          },
-        ];
-      });
-
-      if (formatted.length !== data.length) {
-        toast.error(
-          "Some assignments could not be loaded (missing permission or deleted assignment)."
-        );
-      }
+      const formatted = data.map((d: any) => ({
+        id: d.id,
+        status: d.status,
+        submission_text: d.submission_text,
+        submission_attachment_path: d.submission_attachment_path,
+        submission_attachment_name: d.submission_attachment_name,
+        score: d.score,
+        teacher_feedback: d.teacher_feedback,
+        submitted_at: d.submitted_at,
+        assignment: d.assignments,
+        class_name: className,
+      }));
       setAssignments(formatted);
     }
     setIsLoading(false);
