@@ -175,8 +175,7 @@ Repository
 This repository is ready for deployment and testing. See the included docs for AI setup and edge function deployment.
 
 ## Project info
-
-**URL**: https://learniverse-ai-classroom.vercel.app/
+https://github.com/akhil148656/learniverse-your-cosmic-classroom.git
 
 ## How can I edit this code?
 
