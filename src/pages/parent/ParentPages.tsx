@@ -988,25 +988,40 @@ export function ParentAIFeedback() {
 
       const studentIds = parentStudents.map((ps) => ps.student_id);
 
-      const { data: students, error: studentsError } = await supabase
-        .from("students")
-        .select("id, user_id")
-        .in("id", studentIds);
+      // Best-effort: parents may not have RLS permissions to read `students`/`profiles`.
+      // Feedback should still render even if names can't be resolved.
+      let students: any[] = [];
+      try {
+        const { data: studentsData, error: studentsError } = await supabase
+          .from("students")
+          .select("id, user_id")
+          .in("id", studentIds);
 
-      if (studentsError) {
-        console.error("ParentAIFeedback: students query failed", studentsError);
-        toast.error(studentsError.message || "Failed to load students");
-        setFeedback([]);
-        return;
+        if (studentsError) {
+          console.error("ParentAIFeedback: students query failed", studentsError);
+        } else {
+          students = (studentsData || []) as any[];
+        }
+      } catch (e) {
+        console.error("ParentAIFeedback: students query threw", e);
       }
 
       const userIds = Array.from(new Set((students || []).map((s: any) => s.user_id).filter(Boolean))) as string[];
-      const { data: profiles, error: profilesError } = userIds.length
-        ? await supabase.from("profiles").select("user_id, full_name").in("user_id", userIds)
-        : { data: [], error: null as any };
-
-      if (profilesError) {
-        console.error("ParentAIFeedback: profiles query failed", profilesError);
+      let profiles: any[] = [];
+      if (userIds.length) {
+        try {
+          const { data: profilesData, error: profilesError } = await supabase
+            .from("profiles")
+            .select("user_id, full_name")
+            .in("user_id", userIds);
+          if (profilesError) {
+            console.error("ParentAIFeedback: profiles query failed", profilesError);
+          } else {
+            profiles = (profilesData || []) as any[];
+          }
+        } catch (e) {
+          console.error("ParentAIFeedback: profiles query threw", e);
+        }
       }
 
       const nameByUserId = new Map<string, string>();
@@ -1030,7 +1045,7 @@ export function ParentAIFeedback() {
       const enriched = (feedbackData || []).map((f: any) => ({
         ...f,
         student_name:
-          nameByUserId.get((students?.find((s: any) => s.id === f.student_id) as any)?.user_id) || "Unknown",
+          nameByUserId.get((students?.find((s: any) => s.id === f.student_id) as any)?.user_id) || "Child",
       }));
       setFeedback(enriched);
     } catch (e) {
@@ -1059,16 +1074,26 @@ export function ParentAIFeedback() {
   };
 
   const acknowledgeFeedback = async (feedbackId: string) => {
+    const reaction = window
+      .prompt("Optional: Add a note/reaction for this feedback (visible to you).", "")
+      ?.trim();
+
     const { error } = await supabase
       .from("ai_feedback")
-      .update({ parent_acknowledged: true })
+      .update({ parent_acknowledged: true, parent_reaction: reaction || null })
       .eq("id", feedbackId);
 
     if (!error) {
       setFeedback((prev) =>
-        prev.map((f) => (f.id === feedbackId ? { ...f, parent_acknowledged: true } : f))
+        prev.map((f) =>
+          f.id === feedbackId
+            ? { ...f, parent_acknowledged: true, parent_reaction: reaction || (f as any).parent_reaction || null }
+            : f
+        )
       );
       toast.success("Feedback acknowledged");
+    } else {
+      toast.error(error.message || "Failed to acknowledge feedback");
     }
   };
 
@@ -1131,7 +1156,7 @@ export function ParentAIFeedback() {
                       {!f.parent_acknowledged ? (
                         <Button size="sm" variant="outline" onClick={() => acknowledgeFeedback(f.id)} className="gap-2">
                           <CheckCircle className="w-4 h-4" />
-                          Acknowledgement
+                          Acknowledge
                         </Button>
                       ) : (
                         <span className="text-xs text-muted-foreground">Acknowledged</span>
@@ -1153,6 +1178,11 @@ export function ParentAIFeedback() {
                   <div className="prose prose-sm text-muted-foreground whitespace-pre-wrap">
                     {f.feedback_text}
                   </div>
+                  {(f as any).parent_reaction ? (
+                    <div className="mt-3 text-sm text-muted-foreground">
+                      <span className="font-medium text-foreground">Your note:</span> {String((f as any).parent_reaction)}
+                    </div>
+                  ) : null}
                 </CardContent>
               </Card>
             ))}
