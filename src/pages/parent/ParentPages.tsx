@@ -322,12 +322,12 @@ export function ParentDashboard() {
               { topics_completed: 0, quizzes_attempted: 0, quizzes_passed: 0, average_score: 0, study_time_minutes: 0 }
             );
 
-            const resolvedName = nameByUserId.get(s.user_id) || "Unknown";
+            const resolvedName = (nameByUserId.get(s.user_id) || "").trim();
             // If the student record is accidentally linked to the parent auth user,
             // avoid showing the parent's name as the child name.
             const safeStudentName = s.user_id === user.id
-              ? (s.student_code ? `Student ${s.student_code}` : "Child")
-              : resolvedName;
+              ? "Child"
+              : (resolvedName || "Child");
 
             return {
               id: s.id,
@@ -441,20 +441,7 @@ export function ParentDashboard() {
   const achievementsStudentLabel = (() => {
     const child = children[0];
     if (!child) return "your child";
-
     const childName = (child.name || "").trim();
-    const parentDisplayName = (child.linked_parent_name || parentName || "").trim();
-
-    // If the child's name matches the parent's name (common during testing/mis-linking),
-    // don't show the parent name in the Achievements subtitle.
-    if (
-      childName &&
-      parentDisplayName &&
-      childName.toLowerCase() === parentDisplayName.toLowerCase()
-    ) {
-      return child.student_code ? `Student ${child.student_code}` : "your child";
-    }
-
     return childName || "your child";
   })();
 
@@ -818,10 +805,10 @@ export function ParentChildProgress() {
             const childClass = s.class_id ? classById.get(s.class_id) : null;
             const teacherId = childClass?.teacher_id ?? null;
 
-            const resolvedName = nameByUserId.get(s.user_id) || "Unknown";
+            const resolvedName = (nameByUserId.get(s.user_id) || "").trim();
             const safeStudentName = s.user_id === user.id
-              ? (s.student_code ? `Student ${s.student_code}` : "Child")
-              : resolvedName;
+              ? "Child"
+              : (resolvedName || "Child");
 
             return {
               id: s.id,
