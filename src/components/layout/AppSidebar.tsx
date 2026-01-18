@@ -92,7 +92,11 @@ export function AppSidebar({ role }: AppSidebarProps) {
           onClick={() => navigate("/")}
         >
           <div className="w-10 h-10 rounded-lg bg-gradient-cosmic flex items-center justify-center">
-            <span className="text-foreground font-display font-bold text-lg">L</span>
+            <img
+              src="/learniverse-logo.svg"
+              alt="Learniverse"
+              className="w-7 h-7"
+            />
           </div>
           <div>
             <h1 className="font-display font-bold text-lg text-foreground">Learniverse</h1>

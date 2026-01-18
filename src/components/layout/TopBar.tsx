@@ -98,7 +98,11 @@ export function TopBar({ showSearch = true, role }: TopBarProps) {
             onClick={() => navigate("/")}
           >
             <div className="w-8 h-8 rounded-lg bg-gradient-cosmic flex items-center justify-center">
-              <span className="text-foreground font-display font-bold text-sm">L</span>
+              <img
+                src="/learniverse-logo.svg"
+                alt="Learniverse"
+                className="w-6 h-6"
+              />
             </div>
             <span className="font-display font-bold text-foreground hidden sm:block">
               Learniverse

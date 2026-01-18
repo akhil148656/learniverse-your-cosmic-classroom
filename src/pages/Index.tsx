@@ -17,7 +17,11 @@ const Index = () => {
           <div className="max-w-7xl mx-auto flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="w-12 h-12 rounded-xl bg-gradient-cosmic flex items-center justify-center animate-pulse-glow">
-                <Atom className="w-7 h-7 text-foreground" />
+                <img
+                  src="/learniverse-logo.svg"
+                  alt="Learniverse"
+                  className="w-8 h-8"
+                />
               </div>
               <span className="font-display font-bold text-2xl text-foreground">Learniverse</span>
             </div>
