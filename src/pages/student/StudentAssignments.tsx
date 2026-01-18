@@ -91,18 +91,31 @@ export default function StudentAssignments() {
       .order("created_at", { ascending: false });
 
     if (data) {
-      const formatted = data.map((d: any) => ({
-        id: d.id,
-        status: d.status,
-        submission_text: d.submission_text,
-        submission_attachment_path: d.submission_attachment_path,
-        submission_attachment_name: d.submission_attachment_name,
-        score: d.score,
-        teacher_feedback: d.teacher_feedback,
-        submitted_at: d.submitted_at,
-        assignment: d.assignments,
-        class_name: className,
-      }));
+      const formatted = data.flatMap((d: any) => {
+        const embeddedAssignment = d.assignments ?? d.assignment ?? null;
+        if (!embeddedAssignment) return [];
+
+        return [
+          {
+            id: d.id,
+            status: d.status,
+            submission_text: d.submission_text,
+            submission_attachment_path: d.submission_attachment_path,
+            submission_attachment_name: d.submission_attachment_name,
+            score: d.score,
+            teacher_feedback: d.teacher_feedback,
+            submitted_at: d.submitted_at,
+            assignment: embeddedAssignment,
+            class_name: className,
+          },
+        ];
+      });
+
+      if (formatted.length !== data.length) {
+        toast.error(
+          "Some assignments could not be loaded (missing permission or deleted assignment)."
+        );
+      }
       setAssignments(formatted);
     }
     setIsLoading(false);
