@@ -53,6 +53,8 @@ interface FeedbackData {
   category: string | null;
   created_at: string;
   parent_acknowledged: boolean;
+  parent_reaction?: string | null;
+  teacher_acknowledged?: boolean | null;
   student_name: string;
 }
 
@@ -268,6 +270,7 @@ export function ParentDashboard() {
               .from("ai_feedback")
               .select("feedback_text")
               .eq("student_id", s.id)
+              .eq("teacher_acknowledged", true)
               .order("created_at", { ascending: false })
               .limit(1)
               .maybeSingle();
@@ -693,6 +696,7 @@ export function ParentChildProgress() {
               .from("ai_feedback")
               .select("feedback_text")
               .eq("student_id", s.id)
+              .eq("teacher_acknowledged", true)
               .order("created_at", { ascending: false })
               .limit(1)
               .maybeSingle();
@@ -1033,6 +1037,7 @@ export function ParentAIFeedback() {
         .from("ai_feedback")
         .select("*")
         .in("student_id", studentIds)
+        .eq("teacher_acknowledged", true)
         .order("created_at", { ascending: false });
 
       if (feedbackError) {

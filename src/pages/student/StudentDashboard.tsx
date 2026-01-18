@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { BookOpen, Trophy, Target, Brain, Zap, Clock, FlaskConical, FileText, Users, GraduationCap, Copy, CheckCircle } from "lucide-react";
+import { BookOpen, Trophy, Target, Brain, Zap, Clock, FlaskConical, FileText, Users, GraduationCap, Copy, CheckCircle, MessageSquare } from "lucide-react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import { StatsCard } from "@/components/cards/StatsCard";
 import { EmptyState } from "@/components/cards/EmptyState";
@@ -24,6 +24,7 @@ export default function StudentDashboard() {
   const [analytics, setAnalytics] = useState<any[]>([]);
   const [suggestions, setSuggestions] = useState<any[]>([]);
   const [assignments, setAssignments] = useState<any[]>([]);
+  const [latestApprovedFeedback, setLatestApprovedFeedback] = useState<{ text: string; createdAt: string } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isLeaving, setIsLeaving] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -95,6 +96,25 @@ export default function StudentDashboard() {
             .limit(6)
         : { data: [] as any[] };
       setAssignments(assignmentsData || []);
+
+      const { data: feedbackRow, error: feedbackError } = await supabase
+        .from("ai_feedback")
+        .select("feedback_text, created_at")
+        .eq("student_id", studentData.id)
+        .eq("teacher_acknowledged", true)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (feedbackError) {
+        // Likely missing RLS policy or migrations; keep quiet but allow the rest of the dashboard.
+        console.warn("StudentDashboard: failed to load ai_feedback", feedbackError);
+        setLatestApprovedFeedback(null);
+      } else if (feedbackRow?.feedback_text) {
+        setLatestApprovedFeedback({ text: feedbackRow.feedback_text, createdAt: feedbackRow.created_at });
+      } else {
+        setLatestApprovedFeedback(null);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -277,6 +297,29 @@ export default function StudentDashboard() {
                 <EmptyState
                   title={isLoading ? "Loading suggestions" : "No suggestions yet"}
                   message={isLoading ? "Curating personalized prompts" : "AI suggestions will appear based on your learning"}
+                  icon={Brain}
+                />
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="font-display text-lg">Latest AI Feedback</CardTitle>
+              <MessageSquare className="w-5 h-5 text-secondary" />
+            </CardHeader>
+            <CardContent>
+              {latestApprovedFeedback?.text ? (
+                <div className="space-y-2">
+                  <p className="text-sm text-muted-foreground whitespace-pre-wrap">{latestApprovedFeedback.text}</p>
+                  <p className="text-xs text-muted-foreground">
+                    Approved: {new Date(latestApprovedFeedback.createdAt).toLocaleString()}
+                  </p>
+                </div>
+              ) : (
+                <EmptyState
+                  title={isLoading ? "Loading feedback" : "No approved feedback yet"}
+                  message={isLoading ? "Checking for teacher-approved feedback" : "Your teacher-approved feedback will appear here."}
                   icon={Brain}
                 />
               )}
