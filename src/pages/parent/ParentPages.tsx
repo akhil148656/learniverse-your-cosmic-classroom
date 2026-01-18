@@ -15,6 +15,7 @@ import { RadialProgress } from "@/components/ui/radial-progress";
 interface ChildData {
   id: string;
   user_id?: string;
+  student_code?: string | null;
   name: string;
   linked_parent_name?: string | null;
   gender?: string | null;
@@ -102,12 +103,12 @@ export function ParentDashboard() {
 
     const { data, error } = await supabase
       .from("profiles")
-      .select("full_name")
+      .select("parent_display_name, full_name")
       .eq("user_id", user.id)
       .maybeSingle();
 
     if (error) return;
-    setParentName(data?.full_name || "");
+    setParentName(data?.parent_display_name || data?.full_name || "");
   };
 
   const saveParentName = async () => {
@@ -126,7 +127,8 @@ export function ParentDashboard() {
 
       const { error } = await supabase
         .from("profiles")
-        .update({ full_name: name })
+        // Use a dedicated parent display name so we don't overwrite student names.
+        .update({ parent_display_name: name } as any)
         .eq("user_id", user.id);
 
       if (error) {
@@ -320,10 +322,18 @@ export function ParentDashboard() {
               { topics_completed: 0, quizzes_attempted: 0, quizzes_passed: 0, average_score: 0, study_time_minutes: 0 }
             );
 
+            const resolvedName = nameByUserId.get(s.user_id) || "Unknown";
+            // If the student record is accidentally linked to the parent auth user,
+            // avoid showing the parent's name as the child name.
+            const safeStudentName = s.user_id === user.id
+              ? (s.student_code ? `Student ${s.student_code}` : "Child")
+              : resolvedName;
+
             return {
               id: s.id,
               user_id: s.user_id,
-              name: nameByUserId.get(s.user_id) || "Unknown",
+              student_code: s.student_code ?? null,
+              name: safeStudentName,
               linked_parent_name: parentNameByStudentId.get(s.id) ?? null,
               gender: s.gender ?? null,
               phone: s.user_id ? (phoneByUserId.get(s.user_id) ?? null) : null,
@@ -378,7 +388,8 @@ export function ParentDashboard() {
       }
 
       // Save parent name to profile (so it persists across sessions)
-      await supabase.from("profiles").update({ full_name: name }).eq("user_id", user.id);
+      // Use a dedicated parent display name so we don't overwrite student names.
+      await supabase.from("profiles").update({ parent_display_name: name } as any).eq("user_id", user.id);
 
       const { data: linkedStudentId, error } = await supabase.rpc("parent_link_student_by_code", {
         _student_code: code,
@@ -426,6 +437,26 @@ export function ParentDashboard() {
   const avgFocus = children.length > 0 
     ? Math.round(children.reduce((sum, c) => sum + c.focus_score, 0) / children.length) 
     : 0;
+
+  const achievementsStudentLabel = (() => {
+    const child = children[0];
+    if (!child) return "your child";
+
+    const childName = (child.name || "").trim();
+    const parentDisplayName = (child.linked_parent_name || parentName || "").trim();
+
+    // If the child's name matches the parent's name (common during testing/mis-linking),
+    // don't show the parent name in the Achievements subtitle.
+    if (
+      childName &&
+      parentDisplayName &&
+      childName.toLowerCase() === parentDisplayName.toLowerCase()
+    ) {
+      return child.student_code ? `Student ${child.student_code}` : "your child";
+    }
+
+    return childName || "your child";
+  })();
 
   const toHours = (mins: number) => {
     const m = Number(mins || 0);
@@ -604,7 +635,7 @@ export function ParentDashboard() {
                         Achievements
                       </CardTitle>
                       <p className="text-sm text-muted-foreground">
-                        Teacher-awarded highlights for {children[0].name}
+                          Teacher-awarded highlights for {achievementsStudentLabel}
                       </p>
                     </CardHeader>
                     <CardContent className="space-y-3">
@@ -787,10 +818,16 @@ export function ParentChildProgress() {
             const childClass = s.class_id ? classById.get(s.class_id) : null;
             const teacherId = childClass?.teacher_id ?? null;
 
+            const resolvedName = nameByUserId.get(s.user_id) || "Unknown";
+            const safeStudentName = s.user_id === user.id
+              ? (s.student_code ? `Student ${s.student_code}` : "Child")
+              : resolvedName;
+
             return {
               id: s.id,
               user_id: s.user_id,
-              name: nameByUserId.get(s.user_id) || "Unknown",
+              student_code: s.student_code ?? null,
+              name: safeStudentName,
               gender: s.gender ?? null,
               phone: s.user_id ? (phoneByUserId.get(s.user_id) ?? null) : null,
               xp_points: s.xp_points || 0,

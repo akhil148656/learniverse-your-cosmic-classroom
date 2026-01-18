@@ -363,6 +363,7 @@ export type Database = {
           full_name: string | null
           gender: string | null
           id: string
+          parent_display_name: string | null
           phone: string | null
           updated_at: string
           user_id: string
@@ -374,6 +375,7 @@ export type Database = {
           full_name?: string | null
           gender?: string | null
           id?: string
+          parent_display_name?: string | null
           phone?: string | null
           updated_at?: string
           user_id: string
@@ -385,6 +387,7 @@ export type Database = {
           full_name?: string | null
           gender?: string | null
           id?: string
+          parent_display_name?: string | null
           phone?: string | null
           updated_at?: string
           user_id?: string
