@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Users, Trophy, Brain, Search, UserPlus, Copy } from "lucide-react";
+import { Users, Trophy, Brain, Search, UserPlus, Copy, Plus } from "lucide-react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -245,6 +245,40 @@ export default function TeacherStudents() {
     }
   };
 
+  const addAchievement = async (studentId: string, studentName: string) => {
+    const title = window.prompt(`Add an achievement for ${studentName}:`, "")?.trim();
+    if (!title) return;
+
+    const description = window.prompt("Optional: Add a short description:", "")?.trim();
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        toast.error("Not logged in");
+        return;
+      }
+
+      const { error } = await supabase
+        .from("student_achievements")
+        .insert({
+          student_id: studentId,
+          teacher_id: user.id,
+          title,
+          description: description || null,
+        });
+
+      if (error) {
+        toast.error(error.message || "Failed to add achievement");
+        return;
+      }
+
+      toast.success("Achievement added");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      toast.error(msg || "Failed to add achievement");
+    }
+  };
+
   return (
     <PortalLayout role="teacher">
       <div className="space-y-6">
@@ -330,6 +364,7 @@ export default function TeacherStudents() {
                     <TableHead className="text-muted-foreground">Focus</TableHead>
                     <TableHead className="text-muted-foreground">Topics</TableHead>
                     <TableHead className="text-muted-foreground">Quizzes</TableHead>
+                    <TableHead className="text-muted-foreground">Achievements</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -377,6 +412,17 @@ export default function TeacherStudents() {
                       </TableCell>
                       <TableCell className="text-muted-foreground">
                         {student.analytics?.quizzes_passed || 0}
+                      </TableCell>
+                      <TableCell>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="gap-2"
+                          onClick={() => addAchievement(student.id, student.profile?.full_name || "this student")}
+                        >
+                          <Plus className="w-4 h-4" />
+                          Add
+                        </Button>
                       </TableCell>
                     </TableRow>
                   ))}

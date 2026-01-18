@@ -632,6 +632,44 @@ export type Database = {
           },
         ]
       }
+      student_achievements: {
+        Row: {
+          awarded_at: string
+          created_at: string
+          description: string | null
+          id: string
+          student_id: string
+          teacher_id: string
+          title: string
+        }
+        Insert: {
+          awarded_at?: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          student_id: string
+          teacher_id: string
+          title: string
+        }
+        Update: {
+          awarded_at?: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          student_id?: string
+          teacher_id?: string
+          title?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "student_achievements_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "students"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       student_assignments: {
         Row: {
           assignment_id: string

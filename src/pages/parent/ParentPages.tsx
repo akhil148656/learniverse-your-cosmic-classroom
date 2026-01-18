@@ -36,6 +36,12 @@ interface ChildData {
   assignments_graded: number;
   avg_assignment_percent: number;
   latest_ai_feedback: string | null;
+  achievements?: Array<{
+    id: string;
+    title: string;
+    description: string | null;
+    awarded_at: string;
+  }>;
 }
 
 interface GradeSummary {
@@ -190,6 +196,28 @@ export function ParentDashboard() {
       const studentUserIds = Array.from(new Set((students || []).map((s: any) => s.user_id).filter(Boolean))) as string[];
       const classIds = Array.from(new Set((students || []).map((s: any) => s.class_id).filter(Boolean))) as string[];
 
+      const { data: achievementsRows, error: achievementsError } = await supabase
+        .from("student_achievements")
+        .select("id, student_id, title, description, awarded_at")
+        .in("student_id", studentIds)
+        .order("awarded_at", { ascending: false })
+        .limit(100);
+      if (achievementsError) toast.error(achievementsError.message);
+
+      const achievementsByStudentId = new Map<string, ChildData["achievements"]>();
+      (achievementsRows || []).forEach((row: any) => {
+        const sid = row.student_id as string | undefined;
+        if (!sid) return;
+        const existing = achievementsByStudentId.get(sid) || [];
+        existing.push({
+          id: row.id,
+          title: row.title,
+          description: row.description ?? null,
+          awarded_at: row.awarded_at,
+        });
+        achievementsByStudentId.set(sid, existing);
+      });
+
       const [{ data: profiles, error: profilesError }, { data: classes, error: classesError }] = await Promise.all([
         supabase.from("profiles").select("user_id, full_name, phone").in("user_id", studentUserIds),
         classIds.length ? supabase.from("classes").select("id, name, class_code, teacher_id").in("id", classIds) : Promise.resolve({ data: [], error: null } as any),
@@ -310,6 +338,7 @@ export function ParentDashboard() {
               assignments_graded: gradedCount || 0,
               avg_assignment_percent: avgAssignmentPercent,
               latest_ai_feedback: latestFeedback?.feedback_text || null,
+              achievements: achievementsByStudentId.get(s.id) || [],
             };
         })
       );
@@ -560,6 +589,43 @@ export function ParentDashboard() {
                     </CardContent>
                   </Card>
                 ))}
+
+                {children.length === 1 ? (
+                  <Card className="bg-card border-border">
+                    <CardHeader>
+                      <CardTitle className="font-display text-lg text-foreground flex items-center gap-2">
+                        <Trophy className="w-5 h-5 text-accent" />
+                        Achievements
+                      </CardTitle>
+                      <p className="text-sm text-muted-foreground">
+                        Teacher-awarded highlights for {children[0].name}
+                      </p>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      {(children[0].achievements || []).length === 0 ? (
+                        <p className="text-sm text-muted-foreground">No achievements yet.</p>
+                      ) : (
+                        <div className="space-y-3">
+                          {(children[0].achievements || []).slice(0, 5).map((a) => (
+                            <div key={a.id} className="p-3 rounded-lg bg-muted/30 border border-border">
+                              <div className="flex items-start justify-between gap-3">
+                                <p className="font-semibold text-foreground">{a.title}</p>
+                                <p className="text-xs text-muted-foreground whitespace-nowrap">
+                                  {new Date(a.awarded_at).toLocaleDateString()}
+                                </p>
+                              </div>
+                              {a.description ? (
+                                <p className="text-sm text-muted-foreground mt-1 whitespace-pre-wrap line-clamp-3">
+                                  {a.description}
+                                </p>
+                              ) : null}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                ) : null}
               </div>
             </div>
 
