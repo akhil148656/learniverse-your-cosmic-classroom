@@ -57,7 +57,7 @@ export default function StudentLogin() {
   const redirectAfterAuth = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
-      navigate("/student/login");
+      navigate("/student-login");
       return;
     }
 

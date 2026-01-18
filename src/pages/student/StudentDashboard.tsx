@@ -34,8 +34,8 @@ export default function StudentDashboard() {
       const {
         data: { user },
       } = await supabase.auth.getUser();
-      if (!user) {
-        navigate("/student/login");
+        if (!user) {
+          navigate("/student-login");
         return;
       }
 
