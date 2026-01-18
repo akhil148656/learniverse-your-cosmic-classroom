@@ -12,6 +12,7 @@ import {
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
+import { BackIconButton } from "@/components/layout/BackIconButton";
 
 interface TopBarProps {
   showSearch?: boolean;
@@ -92,6 +93,10 @@ export function TopBar({ showSearch = true, role }: TopBarProps) {
     <header className="sticky top-0 z-40 w-full border-b border-border bg-background/80 backdrop-blur-xl">
       <div className="flex h-16 items-center justify-between px-4 gap-4">
         <div className="flex items-center gap-4">
+          <BackIconButton
+            fallbackHref={`/${role}/dashboard`}
+            className="text-muted-foreground hover:text-foreground"
+          />
           <SidebarTrigger className="text-muted-foreground hover:text-foreground" />
           <div 
             className="flex items-center gap-2 cursor-pointer" 

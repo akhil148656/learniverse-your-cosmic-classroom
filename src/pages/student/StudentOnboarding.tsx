@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { StarField } from "@/components/ui/StarField";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { BackIconButton } from "@/components/layout/BackIconButton";
 
 export default function StudentOnboarding() {
   const navigate = useNavigate();
@@ -235,6 +236,10 @@ export default function StudentOnboarding() {
     <div className="min-h-screen bg-background flex items-center justify-center p-6 relative">
       <StarField />
       <Card className="w-full max-w-lg relative z-10 bg-card/80 backdrop-blur-xl border-border">
+        <BackIconButton
+          fallbackHref="/student-login"
+          className="absolute left-4 top-4 z-20 text-muted-foreground hover:text-foreground"
+        />
         <CardHeader className="text-center space-y-4">
           <CardTitle className="font-display text-2xl text-foreground">How do you want to learn?</CardTitle>
           <CardDescription className="text-muted-foreground">Choose your learning path</CardDescription>

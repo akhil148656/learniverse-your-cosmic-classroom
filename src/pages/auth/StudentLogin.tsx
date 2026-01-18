@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import { GraduationCap, Mail, Phone, ArrowRight, ArrowLeft } from "lucide-react";
+import { GraduationCap, Mail, Phone, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,6 +10,7 @@ import { StarField } from "@/components/ui/StarField";
 import { ToastAction } from "@/components/ui/toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { BackIconButton } from "@/components/layout/BackIconButton";
 
 export default function StudentLogin() {
   const navigate = useNavigate();
@@ -167,15 +168,10 @@ export default function StudentLogin() {
       
       <Card className="w-full max-w-md relative z-10 bg-card/80 backdrop-blur-xl border-border">
         <CardHeader className="text-center space-y-4">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => navigate("/")}
+          <BackIconButton
+            fallbackHref="/"
             className="absolute left-4 top-4 text-muted-foreground hover:text-foreground"
-          >
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Back
-          </Button>
+          />
           
           <div className="w-16 h-16 rounded-xl bg-primary/20 flex items-center justify-center mx-auto">
             <GraduationCap className="w-8 h-8 text-primary" />
