@@ -202,10 +202,16 @@ export function ParentDashboard() {
         .in("student_id", studentIds)
         .order("awarded_at", { ascending: false })
         .limit(100);
-      if (achievementsError) toast.error(achievementsError.message);
+      // If migrations haven't been applied yet, PostgREST may not know about the table.
+      // Don't show a scary error to parents; keep UI usable.
+      const achievementsTableMissing =
+        !!achievementsError?.message &&
+        achievementsError.message.toLowerCase().includes("student_achievements") &&
+        achievementsError.message.toLowerCase().includes("schema cache");
+      if (achievementsError && !achievementsTableMissing) toast.error(achievementsError.message);
 
       const achievementsByStudentId = new Map<string, ChildData["achievements"]>();
-      (achievementsRows || []).forEach((row: any) => {
+      (achievementsTableMissing ? [] : (achievementsRows || [])).forEach((row: any) => {
         const sid = row.student_id as string | undefined;
         if (!sid) return;
         const existing = achievementsByStudentId.get(sid) || [];

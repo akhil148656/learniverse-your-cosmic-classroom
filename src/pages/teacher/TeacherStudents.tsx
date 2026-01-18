@@ -268,7 +268,15 @@ export default function TeacherStudents() {
         });
 
       if (error) {
-        toast.error(error.message || "Failed to add achievement");
+        const msg = error.message || "Failed to add achievement";
+        const missingTable =
+          msg.toLowerCase().includes("student_achievements") &&
+          msg.toLowerCase().includes("schema cache");
+        toast.error(
+          missingTable
+            ? "Achievements table is not deployed yet. Run Supabase migrations, then try again."
+            : msg
+        );
         return;
       }
 
