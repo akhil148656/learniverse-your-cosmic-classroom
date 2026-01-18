@@ -8,7 +8,37 @@ const corsHeaders = {
 };
 
 // Bump this string whenever you redeploy, to confirm you're hitting the latest code.
-const DEPLOY_MARK = "ai-mentor-v2-groq-fallback";
+const DEPLOY_MARK = "ai-mentor-v3-attachments";
+
+function clampInt(value: unknown, fallback: number, min: number, max: number): number {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, Math.trunc(n)));
+}
+
+function limitToLines(raw: string, maxLines: number): string {
+  const normalized = String(raw || "").replace(/\r\n/g, "\n").trim();
+  if (!normalized) return "";
+
+  const lines = normalized
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+
+  if (lines.length >= maxLines) return lines.slice(0, maxLines).join("\n");
+
+  // If the model didn't include line breaks, fall back to sentence-ish splitting.
+  if (lines.length <= 1) {
+    const parts = normalized
+      .replace(/\s+/g, " ")
+      .split(/(?<=[.!?])\s+/)
+      .map((p) => p.trim())
+      .filter((p) => p.length > 0);
+    if (parts.length > 1) return parts.slice(0, maxLines).join("\n");
+  }
+
+  return lines.join("\n");
+}
 
 function normalizeGeminiModel(input: string): string {
   const raw = (input || "").trim();
@@ -31,7 +61,7 @@ serve(async (req: Request) => {
   }
 
   try {
-    const { messages, type } = await req.json();
+    const { messages, type, maxLines, attachment } = await req.json();
     const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
     const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY");
 
@@ -50,6 +80,8 @@ serve(async (req: Request) => {
       type,
       geminiModel: GEMINI_MODEL,
       geminiModelRaw: GEMINI_MODEL_RAW,
+      hasAttachment: Boolean(attachment),
+      attachmentKind: attachment?.kind,
     };
 
     console.log("ai-mentor diagnostics:", diagnostics);
@@ -76,7 +108,10 @@ serve(async (req: Request) => {
       );
     }
 
-    console.log(`AI request - type: ${type}, messages: ${messages.length}`);
+    const safeType = type === "notes" || type === "quiz" ? type : "chat";
+    const lineLimit = safeType === "quiz" ? null : clampInt(maxLines, 3, 1, 6);
+
+    console.log(`AI request - type: ${safeType}, messages: ${messages.length}, maxLines: ${lineLimit ?? "none"}`);
 
     let systemPrompt = `You are an AI learning mentor for Learniverse, an educational platform for students in grades 6-12. 
     You help students understand complex topics, answer questions, and provide encouragement.
@@ -84,23 +119,21 @@ serve(async (req: Request) => {
     Use examples and analogies to explain difficult concepts.
     Always encourage curiosity and learning.`;
 
-    if (type === "notes") {
-      systemPrompt = `You are an AI tutor for Learniverse. Generate comprehensive, easy-to-understand notes on the given topic.
-      Structure your response with:
-      - Clear headings and subheadings
-      - Key concepts explained simply
-      - Examples and real-world applications
-      - Important formulas or definitions (if applicable)
-      - Summary points at the end
-      Use markdown formatting for better readability.
-      Adapt the difficulty level to grades 6-12.`;
-    } else if (type === "quiz") {
+    if (safeType === "notes") {
+      systemPrompt = `You are an AI tutor for Learniverse.
+      Explain the topic simply for grades 6-12.
+      Output MUST be concise and helpful.`;
+    } else if (safeType === "quiz") {
       systemPrompt = `You are a quiz generator for Learniverse. Create educational quiz questions on the given topic.
       Return a JSON array with exactly 5 questions in this format:
       [{"question": "...", "options": ["A", "B", "C", "D"], "correct": 0, "explanation": "..."}]
       where "correct" is the index of the correct answer (0-3).
       Make questions progressively harder.
       Include explanations for learning.`;
+    }
+
+    if (lineLimit) {
+      systemPrompt += `\n\nHard rule: respond in at most ${lineLimit} short lines. No extra paragraphs.`;
     }
 
     // Groq (OpenAI-compatible). We request a single completion, then we stream it to the client in OpenAI-ish SSE chunks.
@@ -113,7 +146,7 @@ serve(async (req: Request) => {
           ...promptMessages.map((m) => ({ role: m.role, content: m.content })),
         ],
         temperature: 0.7,
-        max_tokens: 1024,
+        max_tokens: lineLimit ? 160 : 1024,
         stream: false,
       };
 
@@ -145,23 +178,53 @@ serve(async (req: Request) => {
       return { raw: data, text: text || "" };
     };
 
+    const parseDataUrlBase64 = (dataUrl: string) => {
+      const raw = String(dataUrl || "");
+      const match = raw.match(/^data:([^;]+);base64,(.+)$/);
+      if (!match) return { mime: "application/octet-stream", base64: "" };
+      return { mime: match[1], base64: match[2] };
+    };
+
     // Gemini direct via Google AI Studio key (we simulate OpenAI-style streaming)
-    const callGemini = async (promptMessages: Array<{ role: "user" | "assistant"; content: string }>) => {
+    const callGemini = async (
+      promptMessages: Array<{ role: "user" | "assistant"; content: string }>,
+      maybeAttachment?: any
+    ) => {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
         GEMINI_MODEL
       )}:generateContent?key=${encodeURIComponent(
         GEMINI_API_KEY ?? ""
       )}`;
 
+      const wantsImage = maybeAttachment?.kind === "image" && typeof maybeAttachment?.dataUrl === "string";
+      const imagePayload = wantsImage ? parseDataUrlBase64(maybeAttachment.dataUrl) : null;
+      const imageMime = wantsImage ? String(maybeAttachment?.mime || imagePayload?.mime || "image/*") : null;
+      const imageBase64 = wantsImage ? String(imagePayload?.base64 || "") : "";
+
+      if (wantsImage && !imageBase64) {
+        throw new Error("Invalid image attachment (missing base64 data URL)");
+      }
+
+      const contents = promptMessages.map((m, idx) => {
+        const isLastUser = wantsImage && m.role === "user" && idx === promptMessages.length - 1;
+        const baseParts: any[] = [{ text: String(m.content || "") }];
+
+        if (isLastUser) {
+          baseParts.push({ inline_data: { mime_type: imageMime, data: imageBase64 } });
+        }
+
+        return {
+          role: m.role === "assistant" ? "model" : "user",
+          parts: baseParts,
+        };
+      });
+
       const body = {
         systemInstruction: { parts: [{ text: systemPrompt }] },
-        contents: promptMessages.map((m) => ({
-          role: m.role === "assistant" ? "model" : "user",
-          parts: [{ text: m.content }],
-        })),
+        contents,
         generationConfig: {
           temperature: 0.7,
-          maxOutputTokens: 1024,
+          maxOutputTokens: lineLimit ? 220 : 1024,
         },
       };
 
@@ -206,11 +269,28 @@ serve(async (req: Request) => {
       return { raw: data, text: text || "" };
     };
 
-    const callProvider = GROQ_API_KEY ? callGroq : callGemini;
-    const provider = GROQ_API_KEY ? "groq" : "gemini";
-    const model = GROQ_API_KEY ? GROQ_MODEL : GEMINI_MODEL;
+    const wantsVision = attachment?.kind === "image";
 
-    if (type === "quiz") {
+    if (wantsVision && !GEMINI_API_KEY) {
+      return new Response(
+        JSON.stringify({
+          error:
+            "Image attachments require GEMINI_API_KEY to be set (Gemini multimodal). Please configure GEMINI_API_KEY in Supabase Edge Function secrets.",
+          diagnostics,
+        }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
+
+    const useGemini = wantsVision ? true : !GROQ_API_KEY;
+    const callProvider = useGemini ? (m: any) => callGemini(m, attachment) : callGroq;
+    const provider = useGemini ? "gemini" : "groq";
+    const model = useGemini ? GEMINI_MODEL : GROQ_MODEL;
+
+    if (safeType === "quiz") {
       const result = await callProvider(messages);
       // Return OpenAI-ish response shape (so any client expecting choices.message.content still works)
       return new Response(
@@ -228,7 +308,7 @@ serve(async (req: Request) => {
 
     const result = await callProvider(messages);
     const encoder = new TextEncoder();
-    const content = result.text;
+    const content = lineLimit ? limitToLines(result.text, lineLimit) : result.text;
 
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
@@ -236,7 +316,7 @@ serve(async (req: Request) => {
           provider,
           model,
           deployMark: DEPLOY_MARK,
-          type,
+          type: safeType,
         });
         controller.enqueue(encoder.encode(`data: ${meta}\n\n`));
 

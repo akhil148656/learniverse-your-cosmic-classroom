@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/cards/EmptyState";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -30,6 +31,8 @@ interface ClassData {
   name: string;
 }
 
+type ClassLookup = { id: string; name: string; grade_level: number | null };
+
 export default function TeacherAssignments() {
   const navigate = useNavigate();
   const [assignments, setAssignments] = useState<Assignment[]>([]);
@@ -37,6 +40,10 @@ export default function TeacherAssignments() {
   const [isLoading, setIsLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [classMode, setClassMode] = useState<"my-classes" | "class-code">("my-classes");
+  const [classCode, setClassCode] = useState("");
+  const [classLookup, setClassLookup] = useState<ClassLookup | null>(null);
+  const [isLookingUpClass, setIsLookingUpClass] = useState(false);
   const [newAssignment, setNewAssignment] = useState({
     title: "",
     description: "",
@@ -53,11 +60,11 @@ export default function TeacherAssignments() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    // Fetch classes
+    // Fetch classes (RLS-scoped): includes owned classes + classes joined via code
     const { data: classesData } = await supabase
       .from("classes")
       .select("id, name")
-      .eq("teacher_id", user.id);
+      .order("created_at", { ascending: false });
     setClasses(classesData || []);
 
     // Fetch assignments
@@ -88,8 +95,50 @@ export default function TeacherAssignments() {
     setIsLoading(false);
   };
 
+  useEffect(() => {
+    if (classMode !== "class-code") return;
+
+    const code = classCode.trim().toUpperCase();
+    if (code.length < 6) {
+      setClassLookup(null);
+      setNewAssignment((prev) => ({ ...prev, class_id: "" }));
+      return;
+    }
+
+    let cancelled = false;
+    setIsLookingUpClass(true);
+
+    const timer = setTimeout(async () => {
+      const { data, error } = await supabase.rpc("find_class_by_code", { _code: code });
+      if (cancelled) return;
+
+      const cls = !error && data && data.length > 0 ? (data[0] as any) : null;
+      if (cls) {
+        const normalized: ClassLookup = {
+          id: cls.id,
+          name: cls.name,
+          grade_level: cls.grade_level ?? null,
+        };
+        setClassLookup(normalized);
+        setNewAssignment((prev) => ({ ...prev, class_id: normalized.id }));
+      } else {
+        setClassLookup(null);
+        setNewAssignment((prev) => ({ ...prev, class_id: "" }));
+      }
+
+      setIsLookingUpClass(false);
+    }, 300);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      setIsLookingUpClass(false);
+    };
+  }, [classMode, classCode]);
+
   const handleCreate = async () => {
-    if (!newAssignment.title.trim() || !newAssignment.class_id) {
+    const targetClassId = newAssignment.class_id;
+    if (!newAssignment.title.trim() || !targetClassId) {
       toast.error("Please fill in all required fields");
       return;
     }
@@ -98,10 +147,39 @@ export default function TeacherAssignments() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
+    // If teacher is assigning via class code, ensure they are linked to that class.
+    // This supports multiple teachers teaching the same class.
+    if (classMode === "class-code") {
+      const alreadyAccessible = classes.some((c) => c.id === targetClassId);
+
+      const code = classCode.trim().toUpperCase();
+      if (code.length < 6) {
+        toast.error("Enter a 6-character class code");
+        setIsCreating(false);
+        return;
+      }
+
+      // Only attempt to join if this class isn't already visible to the teacher under RLS.
+      if (!alreadyAccessible) {
+        const { error: joinError } = await supabase.rpc("teacher_join_class_by_code", { _code: code });
+        if (joinError) {
+          const msg = joinError.message || "Failed to link teacher to class";
+          const isMissingRpc = msg.includes("Could not find the function public.teacher_join_class_by_code");
+          toast.error(
+            isMissingRpc
+              ? "Your Supabase database is missing the latest migrations (teacher_join_class_by_code). Run the Supabase migration push, then try again."
+              : msg
+          );
+          setIsCreating(false);
+          return;
+        }
+      }
+    }
+
     const { data: assignment, error } = await supabase.from("assignments").insert({
       title: newAssignment.title,
       description: newAssignment.description || null,
-      class_id: newAssignment.class_id,
+      class_id: targetClassId,
       due_date: newAssignment.due_date || null,
       max_score: parseInt(newAssignment.max_score) || 100,
       teacher_id: user.id,
@@ -115,7 +193,7 @@ export default function TeacherAssignments() {
       const { data: students } = await supabase
         .from("students")
         .select("id")
-        .eq("class_id", newAssignment.class_id);
+        .eq("class_id", targetClassId);
 
       if (students && students.length > 0) {
         const studentAssignments = students.map((s) => ({
@@ -128,6 +206,9 @@ export default function TeacherAssignments() {
 
       toast.success("Assignment created and sent to students!");
       setDialogOpen(false);
+      setClassCode("");
+      setClassLookup(null);
+      setClassMode("my-classes");
       setNewAssignment({ title: "", description: "", class_id: "", due_date: "", max_score: "100" });
       fetchData();
     }
@@ -184,19 +265,47 @@ export default function TeacherAssignments() {
                 </div>
                 <div className="space-y-2">
                   <Label>Class *</Label>
-                  <Select
-                    value={newAssignment.class_id}
-                    onValueChange={(v) => setNewAssignment({ ...newAssignment, class_id: v })}
-                  >
-                    <SelectTrigger className="bg-muted border-border">
-                      <SelectValue placeholder="Select class" />
-                    </SelectTrigger>
-                    <SelectContent className="bg-card border-border">
-                      {classes.map((c) => (
-                        <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <Tabs value={classMode} onValueChange={(v) => setClassMode(v as any)}>
+                    <TabsList className="grid grid-cols-2 w-full">
+                      <TabsTrigger value="my-classes">My classes</TabsTrigger>
+                      <TabsTrigger value="class-code">By class code</TabsTrigger>
+                    </TabsList>
+
+                    <TabsContent value="my-classes" className="mt-3">
+                      <Select
+                        value={newAssignment.class_id}
+                        onValueChange={(v) => setNewAssignment({ ...newAssignment, class_id: v })}
+                      >
+                        <SelectTrigger className="bg-muted border-border">
+                          <SelectValue placeholder="Select class" />
+                        </SelectTrigger>
+                        <SelectContent className="bg-card border-border">
+                          {classes.map((c) => (
+                            <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </TabsContent>
+
+                    <TabsContent value="class-code" className="mt-3 space-y-2">
+                      <Input
+                        placeholder="ABC123"
+                        value={classCode}
+                        maxLength={6}
+                        onChange={(e) => setClassCode(e.target.value.toUpperCase())}
+                        className="bg-muted border-border text-center tracking-widest"
+                      />
+                      <div className="text-sm text-muted-foreground">
+                        {isLookingUpClass
+                          ? "Checking class code…"
+                          : classLookup
+                            ? `Class found: ${classLookup.name}${classLookup.grade_level ? ` (Grade ${classLookup.grade_level})` : ""}`
+                            : classCode.trim().length >= 6
+                              ? "Invalid class code"
+                              : "Enter the 6-character code from the class"}
+                      </div>
+                    </TabsContent>
+                  </Tabs>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">

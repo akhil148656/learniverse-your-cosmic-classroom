@@ -1,11 +1,29 @@
 import { useState, useEffect } from "react";
-import { HelpCircle, Trophy, Clock, Sparkles, Loader2 } from "lucide-react";
+import { HelpCircle, Trophy, Clock, Sparkles, Loader2, Trash2 } from "lucide-react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { EmptyState } from "@/components/cards/EmptyState";
 import { QuizModal } from "@/components/student/QuizModal";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
@@ -21,6 +39,11 @@ interface QuizAttempt {
   };
 }
 
+const ALLOWED_QUESTION_COUNTS = [3, 5, 10, 15] as const;
+type AllowedQuestionCount = (typeof ALLOWED_QUESTION_COUNTS)[number];
+const isAllowedQuestionCount = (value: number): value is AllowedQuestionCount =>
+  (ALLOWED_QUESTION_COUNTS as readonly number[]).includes(value);
+
 export default function StudentQuizzes() {
   const [quizAttempts, setQuizAttempts] = useState<QuizAttempt[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -28,6 +51,9 @@ export default function StudentQuizzes() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [showQuiz, setShowQuiz] = useState(false);
   const [currentTopic, setCurrentTopic] = useState("");
+  const [questionCount, setQuestionCount] = useState<AllowedQuestionCount>(5);
+  const [studentId, setStudentId] = useState<string | null>(null);
+  const [isClearingHistory, setIsClearingHistory] = useState(false);
 
   useEffect(() => {
     fetchQuizAttempts();
@@ -47,6 +73,8 @@ export default function StudentQuizzes() {
       setIsLoading(false);
       return;
     }
+
+    setStudentId(student.id);
 
     const { data } = await supabase
       .from("quiz_attempts")
@@ -71,9 +99,37 @@ export default function StudentQuizzes() {
     setIsLoading(false);
   };
 
+  const clearQuizHistory = async () => {
+    if (!studentId) {
+      toast.error("Unable to find your student record");
+      return;
+    }
+
+    setIsClearingHistory(true);
+    const { error } = await supabase
+      .from("quiz_attempts")
+      .delete()
+      .eq("student_id", studentId);
+
+    if (error) {
+      toast.error("Failed to clear quiz history");
+      setIsClearingHistory(false);
+      return;
+    }
+
+    setQuizAttempts([]);
+    toast.success("Quiz history cleared");
+    setIsClearingHistory(false);
+  };
+
   const generateQuiz = async () => {
     if (!topicInput.trim()) {
       toast.error("Please enter a topic");
+      return;
+    }
+
+    if (!isAllowedQuestionCount(questionCount)) {
+      toast.error("Please select 3, 5, 10, or 15 questions");
       return;
     }
 
@@ -124,6 +180,28 @@ export default function StudentQuizzes() {
                     className="bg-muted border-border"
                     onKeyDown={(e) => e.key === "Enter" && generateQuiz()}
                   />
+
+                  <div className="w-[160px]">
+                    <Select
+                      value={String(questionCount)}
+                      onValueChange={(v) => {
+                        const next = Number(v);
+                        if (isAllowedQuestionCount(next)) setQuestionCount(next);
+                      }}
+                    >
+                      <SelectTrigger className="bg-muted border-border">
+                        <SelectValue placeholder="Questions" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {ALLOWED_QUESTION_COUNTS.map((n) => (
+                          <SelectItem key={n} value={String(n)}>
+                            {n} questions
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
                   <Button
                     onClick={generateQuiz}
                     disabled={isGenerating || !topicInput.trim()}
@@ -171,11 +249,52 @@ export default function StudentQuizzes() {
         </div>
 
         <Card className="bg-card border-border">
-          <CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between gap-3">
             <CardTitle className="font-display text-lg flex items-center gap-2">
               <Clock className="w-5 h-5 text-muted-foreground" />
               Quiz History
             </CardTitle>
+
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-2"
+                  disabled={isLoading || quizAttempts.length === 0}
+                  title="Delete your quiz attempt history"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Clear history
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Clear quiz history?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This permanently deletes your quiz attempts and may affect your stats and analytics.
+                    This can’t be undone.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel disabled={isClearingHistory}>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={clearQuizHistory}
+                    disabled={isClearingHistory}
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  >
+                    {isClearingHistory ? (
+                      <span className="inline-flex items-center gap-2">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Clearing...
+                      </span>
+                    ) : (
+                      "Yes, clear"
+                    )}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </CardHeader>
           <CardContent>
             {isLoading ? (
@@ -219,6 +338,7 @@ export default function StudentQuizzes() {
           isOpen={showQuiz}
           onClose={() => setShowQuiz(false)}
           topic={currentTopic}
+          questionCount={questionCount}
           onCompleted={fetchQuizAttempts}
         />
       </div>

@@ -101,6 +101,25 @@ export default function StudentDashboard() {
     void fetchStudentData();
   }, []);
 
+  useEffect(() => {
+    const onFocus = () => {
+      void fetchStudentData();
+    };
+
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") {
+        void fetchStudentData();
+      }
+    };
+
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
+
   const totalXP = student?.xp_points || 0;
   const focusScore = student?.focus_score || 100;
   const totalTopics = analytics.reduce((sum, a) => sum + (a.topics_completed || 0), 0);

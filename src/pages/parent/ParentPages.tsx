@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
-import { LayoutDashboard, Baby, Brain, Bell, Trophy, BookOpen, Target, Link2, Loader2, CheckCircle, AlertCircle } from "lucide-react";
+import { LayoutDashboard, Baby, Brain, Bell, Trophy, BookOpen, Target, Link2, Loader2, CheckCircle, AlertCircle, Trash2, RefreshCw } from "lucide-react";
 import NotesAgent from "@/components/NotesAgent";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -958,54 +958,105 @@ export function ParentChildProgress() {
 export function ParentAIFeedback() {
   const [feedback, setFeedback] = useState<FeedbackData[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  useEffect(() => {
-    const fetchFeedback = async () => {
+  const fetchFeedback = async () => {
+    setIsLoading(true);
+    try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      if (!user) {
+        setFeedback([]);
+        return;
+      }
 
-      const { data: parentStudents } = await supabase
+      const { data: parentStudents, error: parentStudentsError } = await supabase
         .from("parent_students")
         .select("student_id")
         .eq("parent_id", user.id);
 
-      if (parentStudents && parentStudents.length > 0) {
-        const studentIds = parentStudents.map((ps) => ps.student_id);
-        
-        const { data: students } = await supabase
-          .from("students")
-          .select("id, user_id")
-          .in("id", studentIds);
-
-        const userIds = Array.from(new Set((students || []).map((s: any) => s.user_id).filter(Boolean))) as string[];
-        const { data: profiles } = userIds.length
-          ? await supabase.from("profiles").select("user_id, full_name").in("user_id", userIds)
-          : { data: [] };
-
-        const nameByUserId = new Map<string, string>();
-        (profiles || []).forEach((p: any) => {
-          if (p?.user_id) nameByUserId.set(p.user_id, p.full_name || "Unknown");
-        });
-
-        const { data: feedbackData } = await supabase
-          .from("ai_feedback")
-          .select("*")
-          .in("student_id", studentIds)
-          .order("created_at", { ascending: false });
-
-        if (feedbackData) {
-          const enriched = feedbackData.map((f) => ({
-            ...f,
-            student_name:
-              nameByUserId.get((students?.find((s: any) => s.id === f.student_id) as any)?.user_id) || "Unknown",
-          }));
-          setFeedback(enriched);
-        }
+      if (parentStudentsError) {
+        console.error("ParentAIFeedback: parent_students query failed", parentStudentsError);
+        toast.error(parentStudentsError.message || "Failed to load linked children");
+        setFeedback([]);
+        return;
       }
+
+      if (!parentStudents || parentStudents.length === 0) {
+        setFeedback([]);
+        return;
+      }
+
+      const studentIds = parentStudents.map((ps) => ps.student_id);
+
+      const { data: students, error: studentsError } = await supabase
+        .from("students")
+        .select("id, user_id")
+        .in("id", studentIds);
+
+      if (studentsError) {
+        console.error("ParentAIFeedback: students query failed", studentsError);
+        toast.error(studentsError.message || "Failed to load students");
+        setFeedback([]);
+        return;
+      }
+
+      const userIds = Array.from(new Set((students || []).map((s: any) => s.user_id).filter(Boolean))) as string[];
+      const { data: profiles, error: profilesError } = userIds.length
+        ? await supabase.from("profiles").select("user_id, full_name").in("user_id", userIds)
+        : { data: [], error: null as any };
+
+      if (profilesError) {
+        console.error("ParentAIFeedback: profiles query failed", profilesError);
+      }
+
+      const nameByUserId = new Map<string, string>();
+      (profiles || []).forEach((p: any) => {
+        if (p?.user_id) nameByUserId.set(p.user_id, p.full_name || "Unknown");
+      });
+
+      const { data: feedbackData, error: feedbackError } = await supabase
+        .from("ai_feedback")
+        .select("*")
+        .in("student_id", studentIds)
+        .order("created_at", { ascending: false });
+
+      if (feedbackError) {
+        console.error("ParentAIFeedback: ai_feedback query failed", feedbackError);
+        toast.error(feedbackError.message || "Failed to load AI feedback");
+        setFeedback([]);
+        return;
+      }
+
+      const enriched = (feedbackData || []).map((f: any) => ({
+        ...f,
+        student_name:
+          nameByUserId.get((students?.find((s: any) => s.id === f.student_id) as any)?.user_id) || "Unknown",
+      }));
+      setFeedback(enriched);
+    } catch (e) {
+      console.error("ParentAIFeedback: unexpected error", e);
+      const msg = e instanceof Error ? e.message : String(e);
+      toast.error(msg || "Failed to load AI feedback");
+      setFeedback([]);
+    } finally {
       setIsLoading(false);
-    };
-    fetchFeedback();
+    }
+  };
+
+  useEffect(() => {
+    void fetchFeedback();
   }, []);
+
+  const refreshNow = async () => {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
+    try {
+      await fetchFeedback();
+      toast.success("Refreshed");
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   const acknowledgeFeedback = async (feedbackId: string) => {
     const { error } = await supabase
@@ -1021,6 +1072,22 @@ export function ParentAIFeedback() {
     }
   };
 
+  const deleteFeedback = async (feedbackId: string) => {
+    if (!window.confirm("Delete this feedback?")) return;
+
+    const { error } = await supabase
+      .from("ai_feedback")
+      .delete()
+      .eq("id", feedbackId);
+
+    if (!error) {
+      setFeedback((prev) => prev.filter((f) => f.id !== feedbackId));
+      toast.success("Feedback deleted");
+    } else {
+      toast.error(error.message || "Failed to delete feedback");
+    }
+  };
+
   const getCategoryColor = (category: string | null) => {
     switch (category) {
       case "achievement": return "bg-accent/20 text-accent";
@@ -1033,8 +1100,16 @@ export function ParentAIFeedback() {
   return (
     <PortalLayout role="parent">
       <div className="space-y-6">
-        <h1 className="font-display text-3xl font-bold text-foreground">AI Feedback</h1>
-        <p className="text-muted-foreground">AI-generated insights about your child's learning</p>
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <h1 className="font-display text-3xl font-bold text-foreground">AI Feedback</h1>
+            <p className="text-muted-foreground">AI-generated insights about your child's learning</p>
+          </div>
+          <Button variant="outline" onClick={refreshNow} disabled={isRefreshing || isLoading} className="gap-2">
+            {isRefreshing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+            Refresh
+          </Button>
+        </div>
 
         {isLoading ? (
           <div className="text-center py-8 text-muted-foreground">Loading...</div>
@@ -1052,12 +1127,25 @@ export function ParentAIFeedback() {
                         {f.category || "progress"}
                       </span>
                     </div>
-                    {!f.parent_acknowledged && (
-                      <Button size="sm" variant="outline" onClick={() => acknowledgeFeedback(f.id)} className="gap-2">
-                        <CheckCircle className="w-4 h-4" />
-                        Acknowledge
+                    <div className="flex items-center gap-2">
+                      {!f.parent_acknowledged ? (
+                        <Button size="sm" variant="outline" onClick={() => acknowledgeFeedback(f.id)} className="gap-2">
+                          <CheckCircle className="w-4 h-4" />
+                          Acknowledgement
+                        </Button>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">Acknowledged</span>
+                      )}
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-9 w-9"
+                        onClick={() => deleteFeedback(f.id)}
+                        title="Delete feedback"
+                      >
+                        <Trash2 className="w-4 h-4 text-destructive" />
                       </Button>
-                    )}
+                    </div>
                   </div>
                   <p className="text-sm text-muted-foreground">{new Date(f.created_at).toLocaleDateString()}</p>
                 </CardHeader>
@@ -1090,7 +1178,8 @@ export function ParentAlerts() {
         .eq("user_id", user.id)
         .order("created_at", { ascending: false });
 
-      setNotifications(data || []);
+      const filtered = (data || []).filter((n) => (n.link || "").startsWith("/parent/"));
+      setNotifications(filtered);
       setIsLoading(false);
     };
     fetchNotifications();
@@ -1107,6 +1196,21 @@ export function ParentAlerts() {
         prev.map((n) => (n.id === notificationId ? { ...n, is_read: true } : n))
       );
     }
+  };
+
+  const deleteNotification = async (notificationId: string) => {
+    const { error } = await supabase
+      .from("notifications")
+      .delete()
+      .eq("id", notificationId);
+
+    if (error) {
+      toast.error(error.message || "Failed to delete notification");
+      return;
+    }
+
+    setNotifications((prev) => prev.filter((n) => n.id !== notificationId));
+    toast.success("Notification deleted");
   };
 
   const getTypeIcon = (type: string | null) => {
@@ -1153,6 +1257,18 @@ export function ParentAlerts() {
                         <p className="text-sm text-muted-foreground mt-1">{n.message}</p>
                       )}
                     </div>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-9 w-9"
+                      title="Delete notification"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void deleteNotification(n.id);
+                      }}
+                    >
+                      <Trash2 className="w-4 h-4 text-destructive" />
+                    </Button>
                     {!n.is_read && (
                       <div className="w-2 h-2 rounded-full bg-primary flex-shrink-0 mt-2" />
                     )}
@@ -1166,3 +1282,4 @@ export function ParentAlerts() {
     </PortalLayout>
   );
 }
+

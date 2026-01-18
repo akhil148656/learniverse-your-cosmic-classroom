@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from "react";
-import { Send, Users, MessageSquare, Loader2 } from "lucide-react";
+import { useMemo, useState, useEffect, useRef } from "react";
+import { Send, Users, MessageSquare, Loader2, Trash2 } from "lucide-react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -33,14 +33,59 @@ export default function StudentDiscussions() {
   const [isSending, setIsSending] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
   const [studentClassId, setStudentClassId] = useState<string | null>(null);
+  const STORAGE_KEY = "learniverse.discussions.clearedAfterByRoomId";
+  const [clearedAfterByRoomId, setClearedAfterByRoomId] = useState<Record<string, string>>(() => {
+    try {
+      const raw = window.localStorage.getItem(STORAGE_KEY);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") return {};
+      return parsed as Record<string, string>;
+    } catch {
+      return {};
+    }
+  });
   const scrollRef = useRef<HTMLDivElement>(null);
   const senderNameCacheRef = useRef<Map<string, string>>(new Map());
+  const senderLookupLastAttemptRef = useRef<Map<string, number>>(new Map());
+
+  const persistClearedAfter = (next: Record<string, string>) => {
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    } catch {
+      // ignore storage issues
+    }
+  };
+
+  const addMessageOnce = (msg: Message) => {
+    setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
+  };
+
+  const visibleMessages = useMemo(() => {
+    if (!selectedRoom) return messages;
+    const clearedAfter = clearedAfterByRoomId[selectedRoom.id];
+    if (!clearedAfter) return messages;
+    const threshold = new Date(clearedAfter).getTime();
+    if (!Number.isFinite(threshold)) return messages;
+    return messages.filter((m) => new Date(m.created_at).getTime() > threshold);
+  }, [messages, selectedRoom, clearedAfterByRoomId]);
 
   const enrichMessagesWithSenderNames = async (rawMessages: Message[]) => {
     const senderIds = Array.from(new Set(rawMessages.map((m) => m.sender_id)));
-    const missingSenderIds = senderIds.filter((id) => !senderNameCacheRef.current.has(id));
+    const now = Date.now();
+    const missingSenderIds = senderIds.filter((id) => {
+      const cached = senderNameCacheRef.current.get(id);
+      // If we previously fell back to Anonymous, retry occasionally in case profiles
+      // were temporarily unavailable (e.g., RLS policy not yet applied).
+      if (!cached || cached === "Anonymous") {
+        const lastAttempt = senderLookupLastAttemptRef.current.get(id) || 0;
+        return now - lastAttempt > 5_000;
+      }
+      return false;
+    });
 
     if (missingSenderIds.length > 0) {
+      missingSenderIds.forEach((id) => senderLookupLastAttemptRef.current.set(id, now));
       const { data: profiles, error } = await supabase
         .from("profiles")
         .select("user_id, full_name")
@@ -48,7 +93,7 @@ export default function StudentDiscussions() {
 
       if (error) {
         // Don't block chat on profile lookup failures
-        missingSenderIds.forEach((id) => senderNameCacheRef.current.set(id, "Anonymous"));
+        console.warn("Failed to load sender profiles; falling back to Anonymous", error);
       } else {
         (profiles || []).forEach((p) => {
           senderNameCacheRef.current.set(p.user_id, p.full_name || "Anonymous");
@@ -117,6 +162,8 @@ export default function StudentDiscussions() {
   useEffect(() => {
     if (!selectedRoom) return;
 
+    setMessages([]);
+
     const fetchMessages = async () => {
       const { data, error } = await supabase
         .from("discussion_messages")
@@ -152,7 +199,7 @@ export default function StudentDiscussions() {
         async (payload) => {
           const newMsg = payload.new as Message;
           const [enriched] = await enrichMessagesWithSenderNames([newMsg]);
-          setMessages((prev) => [...prev, enriched]);
+          addMessageOnce(enriched);
         }
       )
       .subscribe();
@@ -166,24 +213,78 @@ export default function StudentDiscussions() {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages]);
+  }, [visibleMessages]);
+
+  const clearChatForMe = () => {
+    if (!selectedRoom) return;
+
+    // Use the latest server timestamp we currently have, so new messages will still appear.
+    const maxTs = messages.reduce<number>((max, m) => {
+      const t = new Date(m.created_at).getTime();
+      return Number.isFinite(t) ? Math.max(max, t) : max;
+    }, 0);
+
+    const clearedAfter = maxTs > 0 ? new Date(maxTs).toISOString() : new Date(0).toISOString();
+
+    setClearedAfterByRoomId((prev) => {
+      const next = { ...prev, [selectedRoom.id]: clearedAfter };
+      persistClearedAfter(next);
+      return next;
+    });
+    toast.success("Chat cleared");
+  };
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMessage.trim() || !selectedRoom || !userId) return;
 
     setIsSending(true);
-    const { error } = await supabase.from("discussion_messages").insert({
-      room_id: selectedRoom.id,
+
+    const trimmed = newMessage.trim();
+    const optimisticId = `temp-${Date.now()}`;
+    const optimisticMessage: Message = {
+      id: optimisticId,
+      message_text: trimmed,
       sender_id: userId,
-      message_text: newMessage,
-    });
+      created_at: new Date().toISOString(),
+    };
+
+    // Show the message immediately even if Realtime isn't enabled.
+    addMessageOnce(optimisticMessage);
+    setNewMessage("");
+
+    const { data, error } = await supabase
+      .from("discussion_messages")
+      .insert({
+        room_id: selectedRoom.id,
+        sender_id: userId,
+        message_text: trimmed,
+      })
+      .select("*")
+      .single();
 
     if (error) {
+      setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
+      setNewMessage(trimmed);
       toast.error("Failed to send message");
-    } else {
-      setNewMessage("");
+      setIsSending(false);
+      return;
     }
+
+    if (data) {
+      const [enriched] = await enrichMessagesWithSenderNames([data as Message]);
+      setMessages((prev) => {
+        const withoutOptimistic = prev.filter((m) => m.id !== optimisticId);
+        return withoutOptimistic.some((m) => m.id === enriched.id)
+          ? withoutOptimistic
+          : [...withoutOptimistic, enriched];
+      });
+    } else {
+      // If we can't get the inserted row back, keep optimistic.
+      setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
+      toast.error("Message sent, but couldn't refresh messages");
+    }
+
     setIsSending(false);
   };
 
@@ -273,18 +374,30 @@ export default function StudentDiscussions() {
             ) : (
               <>
                 <CardHeader className="border-b border-border pb-4">
-                  <CardTitle className="font-display text-lg flex items-center gap-2">
-                    <MessageSquare className="w-5 h-5 text-primary" />
-                    {selectedRoom.name}
-                  </CardTitle>
+                  <div className="flex items-center justify-between gap-3">
+                    <CardTitle className="font-display text-lg flex items-center gap-2">
+                      <MessageSquare className="w-5 h-5 text-primary" />
+                      {selectedRoom.name}
+                    </CardTitle>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={clearChatForMe}
+                      className="gap-2"
+                      title="Clear messages (only for you)"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      Clear
+                    </Button>
+                  </div>
                 </CardHeader>
                 <CardContent className="flex-1 flex flex-col overflow-hidden p-0">
                   <ScrollArea className="flex-1 p-4" ref={scrollRef}>
                     <div className="space-y-4">
-                      {messages.length === 0 ? (
+                      {visibleMessages.length === 0 ? (
                         <p className="text-center text-muted-foreground py-8">No messages yet. Start the conversation!</p>
                       ) : (
-                        messages.map((msg) => (
+                        visibleMessages.map((msg) => (
                           <div
                             key={msg.id}
                             className={`flex gap-3 ${msg.sender_id === userId ? "justify-end" : "justify-start"}`}

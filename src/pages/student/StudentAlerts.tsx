@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { AlertCircle, Bell, CheckCircle } from "lucide-react";
+import { AlertCircle, Bell, CheckCircle, Trash2 } from "lucide-react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import { EmptyState } from "@/components/cards/EmptyState";
 import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 
 interface NotificationData {
   id: string;
@@ -33,7 +35,8 @@ export default function StudentAlerts() {
         .eq("user_id", user.id)
         .order("created_at", { ascending: false });
 
-      setNotifications(data || []);
+      const filtered = (data || []).filter((n) => (n.link || "").startsWith("/student/"));
+      setNotifications(filtered);
       setIsLoading(false);
     };
 
@@ -51,6 +54,22 @@ export default function StudentAlerts() {
         prev.map((n) => (n.id === notificationId ? { ...n, is_read: true } : n))
       );
     }
+  };
+
+  const deleteNotification = async (notificationId: string) => {
+    const { error } = await supabase
+      .from("notifications")
+      .delete()
+      .eq("id", notificationId);
+
+    if (error) {
+      console.error("Failed to delete notification", error);
+      toast.error(error.message || "Failed to delete notification");
+      return;
+    }
+
+    setNotifications((prev) => prev.filter((n) => n.id !== notificationId));
+    toast.success("Notification deleted");
   };
 
   const getTypeIcon = (type: string | null) => {
@@ -106,6 +125,18 @@ export default function StudentAlerts() {
                       </div>
                       {n.message && <p className="text-sm text-muted-foreground mt-1">{n.message}</p>}
                     </div>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-9 w-9"
+                      title="Delete notification"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void deleteNotification(n.id);
+                      }}
+                    >
+                      <Trash2 className="w-4 h-4 text-destructive" />
+                    </Button>
                     {!n.is_read && <div className="w-2 h-2 rounded-full bg-primary flex-shrink-0 mt-2" />}
                   </div>
                 </CardContent>
@@ -117,3 +148,4 @@ export default function StudentAlerts() {
     </PortalLayout>
   );
 }
+

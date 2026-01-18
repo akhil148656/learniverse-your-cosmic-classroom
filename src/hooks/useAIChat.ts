@@ -1,7 +1,27 @@
-import { useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { toast } from "sonner";
 
 type Message = { role: "user" | "assistant"; content: string };
+
+export type ChatAttachment =
+  | {
+      kind: "image";
+      name: string;
+      mime: string;
+      dataUrl: string;
+      size: number;
+    }
+  | {
+      kind: "pdf";
+      name: string;
+      mime: "application/pdf";
+      extractedText: string;
+      size: number;
+    };
+
+type SendMessageOptions = {
+  attachment?: ChatAttachment | null;
+};
 
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-mentor`;
 
@@ -9,10 +29,38 @@ export function useAIChat() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
-  const sendMessage = useCallback(async (input: string, type: "chat" | "notes" | "quiz" = "chat") => {
-    const userMsg: Message = { role: "user", content: input };
-    setMessages(prev => [...prev, userMsg]);
+  const messagesRef = useRef<Message[]>([]);
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  const sendMessage = useCallback(
+    async (input: string, type: "chat" | "notes" | "quiz" = "chat", options: SendMessageOptions = {}) => {
+    const attachment = options.attachment ?? null;
+
+    const displaySuffix = attachment ? `\n\n(Attached: ${attachment.name})` : "";
+    const userMsg: Message = { role: "user", content: input + displaySuffix };
+
+    const prior = messagesRef.current;
+    setMessages([...prior, userMsg]);
     setIsLoading(true);
+
+    const apiUserContentParts: string[] = [input];
+    if (attachment?.kind === "pdf") {
+      const text = String(attachment.extractedText || "").trim();
+      if (text) {
+        apiUserContentParts.push(
+          `\n\n[The student attached a PDF: ${attachment.name}. Extracted text below. Use it to answer the student's doubt.]\n\n"""\n${text}\n"""`
+        );
+      } else {
+        apiUserContentParts.push(`\n\n[The student attached a PDF: ${attachment.name}. No text could be extracted.]`);
+      }
+    }
+    if (attachment?.kind === "image") {
+      apiUserContentParts.push(`\n\n[The student attached an image: ${attachment.name}. Use the image to answer.]`);
+    }
+
+    const apiMessages: Message[] = [...prior, { role: "user", content: apiUserContentParts.join("") }];
 
     try {
       const resp = await fetch(CHAT_URL, {
@@ -22,7 +70,7 @@ export function useAIChat() {
           "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
           "Authorization": `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
         },
-        body: JSON.stringify({ messages: [...messages, userMsg], type }),
+        body: JSON.stringify({ messages: apiMessages, type, attachment }),
       });
 
       console.log("AI response status:", resp.status);
@@ -146,7 +194,7 @@ export function useAIChat() {
       setIsLoading(false);
       return null;
     }
-  }, [messages]);
+  }, []);
 
   const clearMessages = useCallback(() => {
     setMessages([]);

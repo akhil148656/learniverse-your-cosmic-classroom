@@ -8,6 +8,7 @@ import { EmptyState } from "@/components/cards/EmptyState";
 import { AIGeneratedNotes } from "@/components/student/AIGeneratedNotes";
 import { YouTubeResults } from "@/components/student/YouTubeResults";
 import { QuizModal } from "@/components/student/QuizModal";
+import { TopicTutorChat } from "@/components/student/TopicTutorChat";
 import { useYouTubeSearch } from "@/hooks/useYouTubeSearch";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -99,8 +100,8 @@ export default function StudentSearch() {
     <PortalLayout role="student">
       <div className="space-y-6">
         <div>
-          <h1 className="font-display text-3xl font-bold text-foreground">Learn & Search</h1>
-          <p className="text-muted-foreground">Search any topic to get AI-generated notes and video resources</p>
+          <h1 className="font-display text-3xl font-bold text-foreground">Search and Learn</h1>
+          <p className="text-muted-foreground">Search a topic, learn with AI notes, and chat for clarity</p>
         </div>
 
         <form onSubmit={handleSearch} className="flex gap-3">
@@ -118,26 +119,32 @@ export default function StudentSearch() {
           </Button>
         </form>
 
-        {!activeTopic && (
-          <EmptyState
-            title="Search for topics"
-            message="Use the search bar above to find topics and get AI-generated notes, videos, and quizzes"
-            icon={Search}
-          />
-        )}
-
-        {activeTopic && (
-          <div className="space-y-6">
-            <AIGeneratedNotes topic={activeTopic} onQuizClick={() => setShowQuiz(true)} />
-            <YouTubeResults
-              videos={videos}
-              isLoading={isLoadingVideos}
-              topic={activeTopic}
-              error={videoError}
-              requiresSetup={requiresSetup}
-            />
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="space-y-6 lg:col-span-2">
+            {!activeTopic ? (
+              <EmptyState
+                title="Search for topics"
+                message="Use the search bar above to find topics and get AI-generated notes, videos, and quizzes"
+                icon={Search}
+              />
+            ) : (
+              <>
+                <AIGeneratedNotes topic={activeTopic} onQuizClick={() => setShowQuiz(true)} />
+                <YouTubeResults
+                  videos={videos}
+                  isLoading={isLoadingVideos}
+                  topic={activeTopic}
+                  error={videoError}
+                  requiresSetup={requiresSetup}
+                />
+              </>
+            )}
           </div>
-        )}
+
+          <div className="lg:col-span-1">
+            <TopicTutorChat topic={activeTopic} />
+          </div>
+        </div>
 
         <QuizModal isOpen={showQuiz} onClose={() => setShowQuiz(false)} topic={activeTopic} />
       </div>

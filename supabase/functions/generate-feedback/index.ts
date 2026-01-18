@@ -9,7 +9,28 @@ const corsHeaders = {
 };
 
 // Bump this string whenever you redeploy, to confirm you're hitting the latest code.
-const DEPLOY_MARK = "generate-feedback-v2-model";
+const DEPLOY_MARK = "generate-feedback-v3-3lines";
+
+const MAX_FEEDBACK_LINES = 3;
+
+function toThreeLines(raw: string): string {
+  const normalized = String(raw || "").replace(/\r\n/g, "\n").trim();
+  if (!normalized) return "";
+
+  const nonEmptyLines = normalized
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const lines = nonEmptyLines.length
+    ? nonEmptyLines
+    : normalized
+        .split(/(?<=[.!?])\s+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+  return lines.slice(0, MAX_FEEDBACK_LINES).join("\n");
+}
 
 function normalizeGeminiModel(input: string): string {
   const raw = (input || "").trim();
@@ -105,22 +126,75 @@ serve(async (req) => {
     const { data: performanceData, error: perfError } = await supabase
       .rpc("get_student_performance_summary", { student_uuid: studentId });
 
-    if (perfError) {
-      console.error("Error fetching performance:", perfError);
-      throw new Error("Failed to fetch student performance");
-    }
+    let performance = performanceData?.[0] || null;
 
-    const performance = performanceData?.[0] || {
-      student_name: "Student",
-      total_xp: 0,
-      focus_score: 100,
-      topics_completed: 0,
-      quizzes_attempted: 0,
-      quizzes_passed: 0,
-      average_score: 0,
-      study_time_minutes: 0,
-      recent_quiz_attempts: [],
-    };
+    if (perfError || !performance) {
+      console.warn("RPC get_student_performance_summary failed; using fallback queries", {
+        message: perfError?.message,
+        code: perfError?.code,
+        details: perfError?.details,
+        hint: perfError?.hint,
+      });
+
+      const { data: studentRow, error: studentErr } = await supabase
+        .from("students")
+        .select("id, user_id, xp_points, focus_score")
+        .eq("id", studentId)
+        .maybeSingle();
+
+      if (studentErr) {
+        console.error("Fallback failed to load student row:", studentErr);
+        throw new Error("Failed to fetch student performance");
+      }
+
+      const studentUserId = studentRow?.user_id ?? null;
+
+      const { data: profileRow } = studentUserId
+        ? await supabase.from("profiles").select("full_name").eq("user_id", studentUserId).maybeSingle()
+        : { data: null };
+
+      const { data: analyticsRows } = await supabase
+        .from("student_analytics")
+        .select("topics_completed, quizzes_attempted, quizzes_passed, average_score, study_time_minutes")
+        .eq("student_id", studentId);
+
+      const rows = (analyticsRows || []) as Array<{
+        topics_completed: number | null;
+        quizzes_attempted: number | null;
+        quizzes_passed: number | null;
+        average_score: number | null;
+        study_time_minutes: number | null;
+      }>;
+
+      const topicsCompleted = rows.reduce((sum, r) => sum + (r.topics_completed || 0), 0);
+      const quizzesAttempted = rows.reduce((sum, r) => sum + (r.quizzes_attempted || 0), 0);
+      const quizzesPassed = rows.reduce((sum, r) => sum + (r.quizzes_passed || 0), 0);
+      const studyTimeMinutes = rows.reduce((sum, r) => sum + (r.study_time_minutes || 0), 0);
+      const avgScore = (() => {
+        const scores = rows.map((r) => r.average_score).filter((v): v is number => typeof v === "number");
+        if (scores.length === 0) return 0;
+        return scores.reduce((a, b) => a + b, 0) / scores.length;
+      })();
+
+      const { data: recentAttempts } = await supabase
+        .from("quiz_attempts")
+        .select("score, accuracy, time_taken_seconds, created_at")
+        .eq("student_id", studentId)
+        .order("created_at", { ascending: false })
+        .limit(5);
+
+      performance = {
+        student_name: profileRow?.full_name || "Student",
+        total_xp: studentRow?.xp_points || 0,
+        focus_score: studentRow?.focus_score || 100,
+        topics_completed: topicsCompleted,
+        quizzes_attempted: quizzesAttempted,
+        quizzes_passed: quizzesPassed,
+        average_score: avgScore,
+        study_time_minutes: studyTimeMinutes,
+        recent_quiz_attempts: recentAttempts || [],
+      };
+    }
 
     console.log("Generating AI feedback for student:", performance.student_name);
 
@@ -132,7 +206,7 @@ serve(async (req) => {
       }
     })();
 
-    const prompt = `Analyze the following student performance data and provide personalized feedback for their parents and teachers.
+    const prompt = `Analyze the following student performance data and provide personalized feedback for both parents and teachers.
 
 Student: ${performance.student_name}
 Total XP: ${performance.total_xp}
@@ -146,19 +220,19 @@ Total Study Time: ${performance.study_time_minutes} minutes
 Recent Quiz Attempts (latest 5, includes score %, accuracy %, and time_taken_seconds):
 ${recentAttemptsText}
 
-Provide:
-1. A brief summary of the student's learning progress
-2. Strengths identified from the data
-3. Areas for improvement
-4. Specific recommendations for parents to help their child
-5. Suggestions for the teacher
+Output REQUIREMENTS (must follow exactly):
+- Output EXACTLY ${MAX_FEEDBACK_LINES} short lines (each on its own line)
+- No title, no bullets, no numbering
+- Each line should be concise and actionable
 
-When assessing performance, explicitly consider BOTH marks scored (score/accuracy) AND time spent (study time + time_taken_seconds from recent quizzes). Highlight patterns like rushing (very low time) or struggling (low score despite high time).
+Line 1: Overall progress summary.
+Line 2: One strength with a data hint (score/time/focus/xp).
+Line 3: One next-step recommendation that parents + teacher can do.
 
-Keep the feedback encouraging, constructive, and actionable. Format as a clear, parent-friendly report.`;
+When assessing performance, consider BOTH marks scored (score/accuracy) AND time spent (study time + time_taken_seconds from recent quizzes).`;
 
     const systemInstruction =
-      "You are an AI educational analyst for Learniverse. Provide insightful, encouraging, and actionable feedback about student performance. Be specific and constructive.";
+      `You are an AI educational analyst for Learniverse. Follow the user's output requirements exactly. Return exactly ${MAX_FEEDBACK_LINES} lines.`;
 
     const generateViaGroq = async () => {
       const url = "https://api.groq.com/openai/v1/chat/completions";
@@ -169,7 +243,7 @@ Keep the feedback encouraging, constructive, and actionable. Format as a clear, 
           { role: "user", content: prompt },
         ],
         temperature: 0.6,
-        max_tokens: 1024,
+        max_tokens: 220,
         stream: false,
       };
 
@@ -213,7 +287,7 @@ Keep the feedback encouraging, constructive, and actionable. Format as a clear, 
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         generationConfig: {
           temperature: 0.6,
-          maxOutputTokens: 1024,
+          maxOutputTokens: 220,
         },
       };
 
@@ -278,13 +352,21 @@ Keep the feedback encouraging, constructive, and actionable. Format as a clear, 
       throw new Error("AI service unavailable");
     }
 
-    const feedbackText = generation.feedbackText || "Unable to generate feedback at this time.";
+    const rawFeedbackText = generation.feedbackText || "";
+    const feedbackText =
+      toThreeLines(rawFeedbackText) ||
+      "Progress: data unavailable.\nStrength: keep consistent study habits.\nNext: set a 15-min daily review plan.";
 
     // Determine category based on performance
+    // NOTE: DB schema historically constrained `category` to a limited set.
+    // To avoid failed inserts on older deployments, we store a conservative DB category
+    // while still returning the richer UI category to the client.
     let category = "progress";
     if (performance.focus_score < 70) category = "focus";
     else if (performance.average_score < 60) category = "improvement";
     else if (performance.quizzes_passed > 5 && performance.average_score > 80) category = "achievement";
+
+    const categoryForDb = category === "focus" ? "focus" : "performance";
 
     // Save feedback to database
     const { data: savedFeedback, error: saveError } = await supabase
@@ -292,7 +374,7 @@ Keep the feedback encouraging, constructive, and actionable. Format as a clear, 
       .insert({
         student_id: studentId,
         feedback_text: feedbackText,
-        category: category,
+        category: categoryForDb,
       })
       .select()
       .single();
@@ -301,10 +383,21 @@ Keep the feedback encouraging, constructive, and actionable. Format as a clear, 
       console.error("Error saving feedback:", saveError);
     }
 
-    return new Response(JSON.stringify({ 
-      feedback: feedbackText, 
+    const saveErrorInfo = saveError
+      ? {
+          message: saveError.message,
+          code: saveError.code,
+          details: saveError.details,
+          hint: saveError.hint,
+        }
+      : null;
+
+    return new Response(JSON.stringify({
+      feedback: feedbackText,
       category,
       saved: !saveError,
+      feedbackId: savedFeedback?.id ?? null,
+      saveError: saveErrorInfo,
       performance,
       provider,
       model,

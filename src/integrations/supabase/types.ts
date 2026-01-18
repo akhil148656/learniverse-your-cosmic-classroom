@@ -139,6 +139,32 @@ export type Database = {
         }
         Relationships: []
       }
+      class_teachers: {
+        Row: {
+          class_id: string
+          created_at: string
+          teacher_id: string
+        }
+        Insert: {
+          class_id: string
+          created_at?: string
+          teacher_id: string
+        }
+        Update: {
+          class_id?: string
+          created_at?: string
+          teacher_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "class_teachers_class_id_fkey"
+            columns: ["class_id"]
+            isOneToOne: false
+            referencedRelation: "classes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       discussion_messages: {
         Row: {
           created_at: string
@@ -975,6 +1001,10 @@ export type Database = {
           id: string
           name: string
         }[]
+      }
+      teacher_join_class_by_code: {
+        Args: { _code: string }
+        Returns: string
       }
       student_join_class_by_code: {
         Args: { _code: string }

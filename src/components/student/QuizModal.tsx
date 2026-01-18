@@ -20,8 +20,14 @@ interface QuizModalProps {
   onClose: () => void;
   onCompleted?: () => void;
   topic: string;
+  questionCount?: number;
 }
 const GENERATE_QUIZ_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-quiz`;
+
+const ALLOWED_QUESTION_COUNTS = [3, 5, 10, 15] as const;
+type AllowedQuestionCount = (typeof ALLOWED_QUESTION_COUNTS)[number];
+const isAllowedQuestionCount = (value: number): value is AllowedQuestionCount =>
+  (ALLOWED_QUESTION_COUNTS as readonly number[]).includes(value);
 
 function computeQuizMetrics(questions: QuizQuestion[], correctCount: number) {
   const totalQuestions = questions.length || 0;
@@ -43,7 +49,7 @@ function computeQuizMetrics(questions: QuizQuestion[], correctCount: number) {
   };
 }
 
-export function QuizModal({ isOpen, onClose, topic, onCompleted }: QuizModalProps) {
+export function QuizModal({ isOpen, onClose, topic, onCompleted, questionCount }: QuizModalProps) {
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
@@ -193,6 +199,12 @@ export function QuizModal({ isOpen, onClose, topic, onCompleted }: QuizModalProp
   const generateQuiz = async () => {
     if (!topic) return;
 
+    const requestedCount = Number(questionCount);
+    const count: AllowedQuestionCount =
+      Number.isFinite(requestedCount) && isAllowedQuestionCount(requestedCount)
+        ? requestedCount
+        : 5;
+
     setIsLoading(true);
     setQuestions([]);
     setCurrentIndex(0);
@@ -220,7 +232,7 @@ export function QuizModal({ isOpen, onClose, topic, onCompleted }: QuizModalProp
         body: JSON.stringify({
           topic,
           difficulty: "auto",
-          questionCount: 5,
+          questionCount: count,
           gradeLevel: gradeLevel ?? 10,
           studentId,
         }),
@@ -276,7 +288,7 @@ export function QuizModal({ isOpen, onClose, topic, onCompleted }: QuizModalProp
     if (isOpen && topic) {
       generateQuiz();
     }
-  }, [isOpen, topic]);
+  }, [isOpen, topic, questionCount]);
 
   const handleAnswer = (index: number) => {
     if (showResult) return;

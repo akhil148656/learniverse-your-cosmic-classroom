@@ -162,10 +162,25 @@ export default function StudentAssignments() {
     } else {
       toast.success("Assignment submitted!");
       setSubmissionFile((prev) => ({ ...prev, [studentAssignmentId]: null }));
+      setAssignments((prev) =>
+        prev.map((a) =>
+          a.id === studentAssignmentId
+            ? {
+                ...a,
+                status: "submitted",
+                submission_text: text || null,
+                submitted_at: new Date().toISOString(),
+                submission_attachment_path: attachmentPath,
+                submission_attachment_name: attachmentName,
+              }
+            : a
+        )
+      );
       fetchAssignments();
     }
     setSubmitting(null);
   };
+
 
   const pending = assignments.filter((a) => a.status === "pending");
   const submitted = assignments.filter((a) => a.status === "submitted");
