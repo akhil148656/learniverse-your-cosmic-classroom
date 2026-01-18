@@ -170,6 +170,7 @@ export default function StudentLogin() {
         <CardHeader className="text-center space-y-4">
           <BackIconButton
             fallbackHref="/"
+            preferFallback
             className="absolute left-4 top-4 text-muted-foreground hover:text-foreground"
           />
           

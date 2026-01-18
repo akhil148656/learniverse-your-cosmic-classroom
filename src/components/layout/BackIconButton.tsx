@@ -6,18 +6,29 @@ type BackIconButtonProps = {
   fallbackHref: string;
   className?: string;
   title?: string;
+  preferFallback?: boolean;
 };
 
-export function BackIconButton({ fallbackHref, className, title = "Back" }: BackIconButtonProps) {
+export function BackIconButton({
+  fallbackHref,
+  className,
+  title = "Back",
+  preferFallback = false,
+}: BackIconButtonProps) {
   const navigate = useNavigate();
 
   const handleBack = () => {
+    if (preferFallback) {
+      navigate(fallbackHref, { replace: true });
+      return;
+    }
+
     // If the user opened this page directly (no in-app history), fall back to a safe route.
     if (window.history.length > 1) {
       navigate(-1);
       return;
     }
-    navigate(fallbackHref);
+    navigate(fallbackHref, { replace: true });
   };
 
   return (
