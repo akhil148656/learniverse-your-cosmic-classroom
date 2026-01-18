@@ -7,6 +7,18 @@ Your Learniverse project already has:
 - ✅ AI Quiz Generator (generates custom quizzes on any topic)
 - ✅ Edge Functions deployed to Supabase
 
+## ✉️ Optional: Disable signup confirmation emails
+
+If you don’t want Supabase to send a confirmation email when a new user signs up, you must turn off email confirmations in your Supabase project settings (this is not controlled by the frontend code).
+
+Steps:
+
+1. Open Supabase Dashboard: https://supabase.com/dashboard/project/wonpmcjrkkuyoubwosfr
+2. Go to **Authentication** → **Providers** → **Email**
+3. Turn **Confirm email** OFF
+
+After this, `supabase.auth.signUp(...)` will immediately return a `session`, and the app will log the user in without any email step.
+
 ## 🔑 Required: Get Your Gemini API Key
 
 Your Supabase Edge Functions call the Google Gemini API (Google AI Studio key).
