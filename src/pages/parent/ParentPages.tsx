@@ -542,9 +542,9 @@ export function ParentDashboard() {
                         </div>
                       </div>
 
-                      <div className="p-3 rounded-lg bg-muted/30 border border-border">
+                      <div className="p-4 rounded-xl bg-muted/30 border border-border min-h-[120px] flex flex-col">
                         <div className="flex items-center justify-between gap-3">
-                          <p className="text-sm font-medium text-foreground">Latest AI feedback</p>
+                          <p className="text-base font-semibold text-foreground">Latest AI feedback</p>
                           <Button
                             size="sm"
                             variant="outline"
@@ -553,7 +553,7 @@ export function ParentDashboard() {
                             View
                           </Button>
                         </div>
-                        <p className="text-sm text-muted-foreground mt-2 whitespace-pre-wrap">
+                        <p className="text-sm md:text-base text-muted-foreground mt-3 whitespace-pre-wrap line-clamp-3">
                           {child.latest_ai_feedback || "No AI feedback yet."}
                         </p>
                       </div>
@@ -895,9 +895,9 @@ export function ParentChildProgress() {
                     </div>
                   </div>
 
-                  <div className="p-3 rounded-lg bg-muted/30 border border-border">
+                  <div className="p-4 rounded-xl bg-muted/30 border border-border min-h-[120px] flex flex-col">
                     <div className="flex items-center justify-between gap-3">
-                      <p className="text-sm font-medium text-foreground">Latest AI feedback</p>
+                      <p className="text-base font-semibold text-foreground">Latest AI feedback</p>
                       <Button
                         size="sm"
                         variant="outline"
@@ -906,7 +906,7 @@ export function ParentChildProgress() {
                         View
                       </Button>
                     </div>
-                    <p className="text-sm text-muted-foreground mt-2 whitespace-pre-wrap">
+                    <p className="text-sm md:text-base text-muted-foreground mt-3 whitespace-pre-wrap line-clamp-3">
                       {child.latest_ai_feedback || "No AI feedback yet."}
                     </p>
                   </div>
