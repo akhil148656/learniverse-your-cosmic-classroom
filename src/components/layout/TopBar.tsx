@@ -96,12 +96,12 @@ export function TopBar({ showSearch = true, role }: TopBarProps) {
     const ok = window.confirm("Do you want to log out and go back?");
     if (!ok) return;
 
-    await supabase.auth.signOut();
-    if (window.history.length > 1) {
-      navigate(-1);
-      return;
+    try {
+      await supabase.auth.signOut();
+    } finally {
+      // Always return to the public home page after logging out.
+      navigate("/", { replace: true });
     }
-    navigate("/");
   };
 
   return (
