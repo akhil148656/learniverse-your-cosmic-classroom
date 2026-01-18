@@ -186,8 +186,13 @@ export default function TeacherAssignments() {
     }).select().single();
 
     if (error) {
-      toast.error("Failed to create assignment");
-      console.error(error);
+      const msg =
+        error.message ||
+        (error as any)?.details ||
+        (error as any)?.hint ||
+        "Failed to create assignment";
+      toast.error(msg);
+      console.error("Create assignment failed", error);
     } else {
       // Assign to all students in the class
       const { data: students } = await supabase
