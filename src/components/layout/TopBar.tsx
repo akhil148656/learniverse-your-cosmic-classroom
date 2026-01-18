@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
-import { Bell, Search, User, LogOut, Menu } from "lucide-react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { Bell, Search, User, LogOut, Menu, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -21,9 +21,12 @@ interface TopBarProps {
 
 export function TopBar({ showSearch = true, role }: TopBarProps) {
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchQuery, setSearchQuery] = useState("");
   const [profile, setProfile] = useState<{ full_name: string | null; email: string | null } | null>(null);
   const [notificationCount, setNotificationCount] = useState(0);
+
+  const isDashboard = location.pathname === `/${role}/dashboard`;
 
   useEffect(() => {
     let channel: ReturnType<typeof supabase.channel> | null = null;
@@ -89,14 +92,39 @@ export function TopBar({ showSearch = true, role }: TopBarProps) {
     navigate("/");
   };
 
+  const handleDashboardBack = async () => {
+    const ok = window.confirm("Do you want to log out and go back?");
+    if (!ok) return;
+
+    await supabase.auth.signOut();
+    if (window.history.length > 1) {
+      navigate(-1);
+      return;
+    }
+    navigate("/");
+  };
+
   return (
     <header className="sticky top-0 z-40 w-full border-b border-border bg-background/80 backdrop-blur-xl">
       <div className="flex h-16 items-center justify-between px-4 gap-4">
         <div className="flex items-center gap-4">
-          <BackIconButton
-            fallbackHref={`/${role}/dashboard`}
-            className="text-muted-foreground hover:text-foreground"
-          />
+          {isDashboard ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={handleDashboardBack}
+              title="Back"
+              aria-label="Back"
+              className="text-muted-foreground hover:text-foreground"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </Button>
+          ) : (
+            <BackIconButton
+              fallbackHref={`/${role}/dashboard`}
+              className="text-muted-foreground hover:text-foreground"
+            />
+          )}
           <SidebarTrigger className="text-muted-foreground hover:text-foreground" />
           <div 
             className="flex items-center gap-2 cursor-pointer" 
