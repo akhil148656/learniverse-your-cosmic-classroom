@@ -17,6 +17,7 @@ import {
   Home,
   Baby,
   Brain,
+  Calendar,
 } from "lucide-react";
 import {
   Sidebar,
@@ -40,6 +41,7 @@ interface NavItem {
 
 const studentNavItems: NavItem[] = [
   { title: "Dashboard", url: "/student/dashboard", icon: LayoutDashboard },
+  { title: "Study Planner", url: "/student/planner", icon: Calendar },
   { title: "Search and Learn", url: "/student/search", icon: Search },
   { title: "Assignments", url: "/student/assignments", icon: FileText },
   { title: "Quizzes", url: "/student/quizzes", icon: HelpCircle },
@@ -55,12 +57,14 @@ const teacherNavItems: NavItem[] = [
   { title: "Assignments", url: "/teacher/assignments", icon: FileText },
   { title: "Analytics", url: "/teacher/analytics", icon: BarChart3 },
   { title: "Feedback", url: "/teacher/feedback", icon: MessageSquare },
+  { title: "My Profile", url: "/teacher/profile", icon: User },
 ];
 
 const parentNavItems: NavItem[] = [
   { title: "Dashboard", url: "/parent/dashboard", icon: LayoutDashboard },
   { title: "Child Progress", url: "/parent/child-progress", icon: Baby },
   { title: "AI Feedback", url: "/parent/ai-feedback", icon: Brain },
+  { title: "My Profile", url: "/parent/profile", icon: User },
 ];
 
 interface AppSidebarProps {

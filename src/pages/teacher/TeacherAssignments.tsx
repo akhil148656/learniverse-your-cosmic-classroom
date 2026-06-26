@@ -194,33 +194,8 @@ export default function TeacherAssignments() {
       toast.error(msg);
       console.error("Create assignment failed", error);
     } else {
-      // Assign to all students in the class
-      const { data: students } = await supabase
-        .from("students")
-        .select("id")
-        .eq("class_id", targetClassId);
-
-      if (!students || students.length === 0) {
-        toast.success("Assignment created.");
-        toast.message("No students found in that class yet.");
-      } else {
-        const studentAssignments = students.map((s) => ({
-          student_id: s.id,
-          assignment_id: assignment.id,
-          status: "pending",
-        }));
-
-        const { error: assignError } = await supabase
-          .from("student_assignments")
-          .insert(studentAssignments);
-
-        if (assignError) {
-          console.error("Failed to assign students", assignError);
-          toast.error(assignError.message || "Failed to assign to students");
-        } else {
-          toast.success("Assignment created and sent to students!");
-        }
-      }
+      // Assign to all students in the class (handled automatically by database trigger)
+      toast.success("Assignment created and sent to students!");
       setDialogOpen(false);
       setClassCode("");
       setClassLookup(null);

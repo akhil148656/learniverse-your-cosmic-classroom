@@ -38,7 +38,7 @@ export default function TeacherAnalytics() {
       const { data } = await supabase
         .from("classes")
         .select("id, name")
-        .eq("teacher_id", user.id);
+        .order("name", { ascending: true });
       setClasses(data || []);
     };
     fetchClasses();

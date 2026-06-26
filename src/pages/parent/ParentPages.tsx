@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import { EmptyState } from "@/components/cards/EmptyState";
 import { StatsCard } from "@/components/cards/StatsCard";
@@ -6,11 +6,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
-import { LayoutDashboard, Baby, Brain, Bell, Trophy, BookOpen, Target, Link2, Loader2, CheckCircle, AlertCircle, Trash2, RefreshCw } from "lucide-react";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { LayoutDashboard, Baby, Brain, Bell, Trophy, BookOpen, Target, Link2, Loader2, CheckCircle, AlertCircle, Trash2, RefreshCw, Sparkles, Clock, Compass, FileText, Camera, Phone, Mail, Pencil, School, User } from "lucide-react";
 import NotesAgent from "@/components/NotesAgent";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { RadialProgress } from "@/components/ui/radial-progress";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 
 interface ChildData {
   id: string;
@@ -37,6 +40,18 @@ interface ChildData {
   assignments_graded: number;
   avg_assignment_percent: number;
   latest_ai_feedback: string | null;
+  latest_report_card?: FeedbackData | null;
+  assignments_timeline?: Array<{
+    id: string;
+    status: "pending" | "submitted" | "reviewed";
+    score: number | null;
+    max_score: number | null;
+    submitted_at: string | null;
+    reviewed_at: string | null;
+    due_date: string | null;
+    teacher_feedback: string | null;
+    title: string;
+  }>;
   achievements?: Array<{
     id: string;
     title: string;
@@ -65,6 +80,298 @@ interface FeedbackData {
   student_name: string;
 }
 
+function parseReportCard(text: string) {
+  const sections: { title: string; content: string[]; type: 'summary' | 'strengths' | 'growth' | 'recommendations' | 'unknown' }[] = [];
+  const lines = text.split('\n');
+  let currentSection: typeof sections[number] | null = null;
+
+  for (let line of lines) {
+    line = line.trim();
+    if (line.startsWith('#')) {
+      const title = line.replace(/^#+\s*/, '');
+      let type: 'summary' | 'strengths' | 'growth' | 'recommendations' | 'unknown' = 'unknown';
+      if (title.toLowerCase().includes('summary') || title.toLowerCase().includes('galactic')) {
+        type = 'summary';
+      } else if (title.toLowerCase().includes('strength') || title.toLowerCase().includes('cognitive')) {
+        type = 'strengths';
+      } else if (title.toLowerCase().includes('growth') || title.toLowerCase().includes('sphere') || title.toLowerCase().includes('development')) {
+        type = 'growth';
+      } else if (title.toLowerCase().includes('recommendation') || title.toLowerCase().includes('astral') || title.toLowerCase().includes('advice')) {
+        type = 'recommendations';
+      }
+      currentSection = { title, content: [], type };
+      sections.push(currentSection);
+    } else if (line) {
+      if (!currentSection) {
+        currentSection = { title: "Academic Insights", content: [], type: 'unknown' };
+        sections.push(currentSection);
+      }
+      currentSection.content.push(line);
+    }
+  }
+  return sections;
+}
+
+// Extract up to `max` bullet-point lines from raw AI feedback for a compact dashboard snippet.
+function summarizeFeedback(text: string | null, max = 2): string {
+  if (!text) return "";
+  const bullets = text
+    .split("\n")
+    .map(l => l.trim())
+    .filter(l => l.startsWith("-") || l.startsWith("•") || l.startsWith("*"))
+    .map(l => l.replace(/^[-•*]\s*/, "").trim())
+    .filter(Boolean);
+  if (bullets.length > 0) return bullets.slice(0, max).join(" · ");
+  // Fallback: first non-heading sentence up to 120 chars
+  const plain = text.replace(/#+[^\n]*/g, "").replace(/\n+/g, " ").trim();
+  return plain.length > 120 ? plain.slice(0, 120).trimEnd() + "…" : plain;
+}
+
+function CosmicReportCard({
+  reportCard,
+  childId,
+  onAcknowledge
+}: {
+  reportCard: FeedbackData;
+  childId: string;
+  onAcknowledge: (id: string, childId: string) => void;
+}) {
+  const sections = parseReportCard(reportCard.feedback_text);
+
+  const getSectionStyles = (type: string) => {
+    switch (type) {
+      case 'summary':
+        return {
+          icon: <Compass className="w-5 h-5 text-indigo-400" />,
+          titleColor: "text-indigo-400",
+          cardBg: "bg-indigo-950/20 border-indigo-500/20"
+        };
+      case 'strengths':
+        return {
+          icon: <Trophy className="w-5 h-5 text-emerald-400" />,
+          titleColor: "text-emerald-400",
+          cardBg: "bg-emerald-950/20 border-emerald-500/20"
+        };
+      case 'growth':
+        return {
+          icon: <Brain className="w-5 h-5 text-amber-400" />,
+          titleColor: "text-amber-400",
+          cardBg: "bg-amber-950/20 border-amber-500/20"
+        };
+      case 'recommendations':
+        return {
+          icon: <Sparkles className="w-5 h-5 text-purple-400" />,
+          titleColor: "text-purple-400",
+          cardBg: "bg-purple-950/20 border-purple-500/20"
+        };
+      default:
+        return {
+          icon: <FileText className="w-5 h-5 text-cyan-400" />,
+          titleColor: "text-cyan-400",
+          cardBg: "bg-cyan-950/20 border-cyan-500/20"
+        };
+    }
+  };
+
+  return (
+    <div className="relative border border-amber-500/30 rounded-2xl overflow-hidden shadow-[0_0_50px_rgba(245,158,11,0.15)] bg-gradient-to-b from-indigo-950/90 to-purple-950/90 w-full max-w-3xl mx-auto my-6">
+      {/* Visual top scrollbar */}
+      <div className="h-3 bg-gradient-to-r from-amber-600 via-amber-400 to-amber-600 rounded-full shadow-[0_0_15px_rgba(245,158,11,0.6)]" />
+
+      {/* Sheen/reflection layer */}
+      <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/5 to-transparent pointer-events-none" />
+
+      <div className="py-6 px-4 sm:px-8 border-x border-amber-500/20 bg-indigo-950/40 relative z-10 space-y-6">
+        <div className="text-center space-y-2">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-mono uppercase tracking-wider">
+            <Sparkles className="w-3.5 h-3.5 animate-pulse" />
+            Galactic Learning Ledger
+          </div>
+          <h3 className="font-display text-2xl sm:text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-amber-200 via-yellow-100 to-amber-200 uppercase tracking-widest drop-shadow-[0_2px_8px_rgba(245,158,11,0.3)]">
+            Cosmic Report Card
+          </h3>
+          <p className="text-xs text-muted-foreground">
+            Academic Cycle Review • Evaluated on {new Date(reportCard.created_at).toLocaleDateString()}
+          </p>
+        </div>
+
+        {/* Scroll body contents */}
+        <div className="space-y-4">
+          {sections.map((section, idx) => {
+            const styles = getSectionStyles(section.type);
+            return (
+              <div key={idx} className={`p-4 rounded-xl border ${styles.cardBg} transition-all hover:scale-[1.01]`}>
+                <div className="flex items-center gap-2 mb-2">
+                  {styles.icon}
+                  <h4 className={`font-display text-sm sm:text-base font-bold uppercase tracking-wider ${styles.titleColor}`}>
+                    {section.title}
+                  </h4>
+                </div>
+                <div className="space-y-1.5 pl-7">
+                  {section.content.map((pText, pIdx) => {
+                    const isBullet = pText.trim().startsWith('-') || pText.trim().startsWith('*');
+                    const cleanText = isBullet ? pText.replace(/^[-*]\s*/, '') : pText;
+                    return (
+                      <p key={pIdx} className="text-xs sm:text-sm text-foreground/80 leading-relaxed font-sans">
+                        {isBullet && <span className="inline-block mr-2 text-amber-400">•</span>}
+                        {cleanText}
+                      </p>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Signature Status */}
+        <div className="pt-4 border-t border-amber-500/20">
+          {reportCard.parent_acknowledged ? (
+            <div className="p-3 sm:p-4 rounded-xl bg-emerald-950/30 border border-emerald-500/30 flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-left">
+              <div className="flex items-center gap-2">
+                <CheckCircle className="w-5 h-5 text-emerald-400 shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-xs sm:text-sm font-semibold text-emerald-300">Endorsement Confirmed</p>
+                  <p className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 truncate">
+                    {reportCard.parent_reaction || "Acknowledged and digitally signed by parent."}
+                  </p>
+                </div>
+              </div>
+              <span className="text-[10px] font-mono uppercase tracking-wider text-emerald-400/70 border border-emerald-500/20 px-2 py-0.5 rounded shrink-0">
+                Verified
+              </span>
+            </div>
+          ) : (
+            <div className="p-3 sm:p-4 rounded-xl bg-amber-950/20 border border-amber-500/20 flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-left">
+              <div className="min-w-0">
+                <p className="text-xs sm:text-sm font-semibold text-amber-400">Awaiting Parental Endorsement</p>
+                <p className="text-[10px] sm:text-xs text-muted-foreground">
+                  Please review this report card and sign below to acknowledge your child's progress.
+                </p>
+              </div>
+              <Button
+                size="sm"
+                onClick={() => onAcknowledge(reportCard.id, childId)}
+                className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold font-display text-xs uppercase tracking-wider h-8 shrink-0"
+              >
+                Sign & Acknowledge
+              </Button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Visual bottom scrollbar */}
+      <div className="h-3 bg-gradient-to-r from-amber-600 via-amber-400 to-amber-600 rounded-full shadow-[0_0_15px_rgba(245,158,11,0.6)]" />
+    </div>
+  );
+}
+
+function AssignmentTimeline({
+  timeline
+}: {
+  timeline: Array<{
+    id: string;
+    status: "pending" | "submitted" | "reviewed";
+    score: number | null;
+    max_score: number | null;
+    submitted_at: string | null;
+    reviewed_at: string | null;
+    due_date: string | null;
+    teacher_feedback: string | null;
+    title: string;
+  }>;
+}) {
+  if (!timeline || timeline.length === 0) {
+    return (
+      <Card className="bg-card border-border">
+        <CardContent className="py-6 text-center text-muted-foreground text-sm">
+          No assignments scheduled or submitted yet. 🚀
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const getStatusInfo = (status: "pending" | "submitted" | "reviewed") => {
+    switch (status) {
+      case "reviewed":
+        return {
+          label: "Graded",
+          badgeColor: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
+          icon: <CheckCircle className="w-4 h-4 text-emerald-400" />,
+          bgColor: "bg-emerald-950/20"
+        };
+      case "submitted":
+        return {
+          label: "Submitted (Pending Review)",
+          badgeColor: "bg-amber-500/10 text-amber-400 border-amber-500/20",
+          icon: <Clock className="w-4 h-4 text-amber-400 animate-pulse" />,
+          bgColor: "bg-amber-950/10"
+        };
+      default:
+        return {
+          label: "Assigned (Pending)",
+          badgeColor: "bg-slate-500/10 text-slate-400 border-slate-500/20",
+          icon: <FileText className="w-4 h-4 text-slate-400" />,
+          bgColor: "bg-slate-900/10"
+        };
+    }
+  };
+
+  return (
+    <div className="relative border-l-2 border-primary/20 ml-3 pl-6 space-y-6 py-2">
+      {timeline.map((item) => {
+        const info = getStatusInfo(item.status);
+        const dateStr = item.status === "reviewed"
+          ? `Graded on ${new Date(item.reviewed_at!).toLocaleDateString()}`
+          : item.status === "submitted"
+            ? `Submitted on ${new Date(item.submitted_at!).toLocaleDateString()}`
+            : item.due_date
+              ? `Due by ${new Date(item.due_date).toLocaleDateString()}`
+              : "Assigned";
+
+        return (
+          <div key={item.id} className="relative group">
+            {/* Timeline node dot */}
+            <span className="absolute -left-[35px] top-1 flex items-center justify-center w-6 h-6 rounded-full bg-slate-900 border border-primary/30 shadow-[0_0_10px_rgba(139,92,246,0.3)] transition-transform group-hover:scale-110">
+              {info.icon}
+            </span>
+
+            <div className={`p-4 rounded-xl border border-border/80 ${info.bgColor} transition-all hover:border-primary/30`}>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="space-y-0.5">
+                  <h4 className="font-semibold text-foreground text-sm sm:text-base">{item.title}</h4>
+                  <p className="text-xs text-muted-foreground">{dateStr}</p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono uppercase tracking-wider border ${info.badgeColor}`}>
+                    {info.label}
+                  </span>
+                  {item.status === "reviewed" && item.score !== null && (
+                    <span className="text-xs font-bold text-accent px-2 py-0.5 rounded-full bg-accent/10 border border-accent/20">
+                      Score: {item.score}/{item.max_score || 100}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {item.status === "reviewed" && item.teacher_feedback && (
+                <div className="mt-3 p-3 rounded-lg bg-background/50 border border-border/50 text-xs italic text-muted-foreground relative">
+                  <span className="absolute -top-2 left-3 px-1.5 py-0.5 text-[8px] font-mono uppercase tracking-wider bg-card border border-border/60 rounded text-primary">
+                    Coach Response
+                  </span>
+                  <p className="mt-1 font-sans">{item.teacher_feedback}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 interface NotificationData {
   id: string;
   title: string;
@@ -85,6 +392,15 @@ const childLabel = (gender?: string | null) => {
   }
 };
 
+interface TeacherContact {
+  name: string;
+  phone: string | null;
+  email: string | null;
+  avatar_url: string | null;
+  subject_specialization: string | null;
+  school_name: string | null;
+}
+
 export function ParentDashboard() {
   const [children, setChildren] = useState<ChildData[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -92,10 +408,127 @@ export function ParentDashboard() {
   const [isLinking, setIsLinking] = useState(false);
   const [parentName, setParentName] = useState("");
   const [isSavingParentName, setIsSavingParentName] = useState(false);
+  const [selectedReportCard, setSelectedReportCard] = useState<{ card: FeedbackData; childId: string } | null>(null);
+  const [teacherContacts, setTeacherContacts] = useState<TeacherContact[]>([]);
+
+  const acknowledgeReportCard = async (reportCardId: string, childId: string) => {
+    const signature = window.prompt("To sign and acknowledge this report card, please enter your full name as a digital signature:", "");
+    if (signature === null) return;
+    if (!signature.trim()) {
+      toast.error("Signature name cannot be empty");
+      return;
+    }
+
+    if (reportCardId.startsWith("local-")) {
+      const localAckKey = `learniverse_local_report_cards_ack_${childId}`;
+      const localReactionKey = `learniverse_local_report_cards_reaction_${childId}`;
+      localStorage.setItem(localAckKey, "true");
+      localStorage.setItem(localReactionKey, `Signed by Parent: ${signature.trim()}`);
+      toast.success("Cosmic Report Card signed and acknowledged locally (offline mode)! 🌌");
+      
+      setChildren(prev => prev.map(child => {
+        if (child.id === childId && child.latest_report_card) {
+          return {
+            ...child,
+            latest_report_card: {
+              ...child.latest_report_card,
+              parent_acknowledged: true,
+              parent_reaction: `Signed by Parent: ${signature.trim()}`
+            }
+          };
+        }
+        return child;
+      }));
+
+      setSelectedReportCard(prev => prev ? {
+        ...prev,
+        card: {
+          ...prev.card,
+          parent_acknowledged: true,
+          parent_reaction: `Signed by Parent: ${signature.trim()}`
+        }
+      } : null);
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from("ai_feedback")
+        .update({
+          parent_acknowledged: true,
+          parent_reaction: `Signed by Parent: ${signature.trim()}`
+        } as any)
+        .eq("id", reportCardId);
+
+      if (error) throw error;
+
+      toast.success("Cosmic Report Card signed and acknowledged! 🌌");
+      
+      setChildren(prev => prev.map(child => {
+        if (child.id === childId && child.latest_report_card) {
+          return {
+            ...child,
+            latest_report_card: {
+              ...child.latest_report_card,
+              parent_acknowledged: true,
+              parent_reaction: `Signed by Parent: ${signature.trim()}`
+            }
+          };
+        }
+        return child;
+      }));
+
+      setSelectedReportCard(prev => prev ? {
+        ...prev,
+        card: {
+          ...prev.card,
+          parent_acknowledged: true,
+          parent_reaction: `Signed by Parent: ${signature.trim()}`
+        }
+      } : null);
+    } catch (err: any) {
+      console.error("Failed to sign report card:", err);
+      toast.error(err.message || "Failed to sign report card");
+    }
+  };
 
   useEffect(() => {
     fetchChildren();
   }, []);
+
+  // Fetch teacher contact info for all linked children's classes
+  useEffect(() => {
+    if (children.length === 0) return;
+    const fetchTeacherContacts = async () => {
+      const teacherIds = Array.from(
+        new Set(children.map((c) => c.teacher_id).filter(Boolean))
+      ) as string[];
+      if (teacherIds.length === 0) return;
+
+      try {
+        const { data, error } = await supabase
+          .from("profiles")
+          .select("user_id, full_name, phone, email, avatar_url, subject_specialization, school_name")
+          .in("user_id", teacherIds);
+        if (error) {
+          console.error("fetchTeacherContacts error:", error);
+          return;
+        }
+        const contacts: TeacherContact[] = (data || []).map((p: any) => ({
+          name: p.full_name || "Teacher",
+          phone: p.phone || null,
+          email: p.email || null,
+          avatar_url: p.avatar_url || null,
+          subject_specialization: p.subject_specialization || null,
+          school_name: p.school_name || null,
+        }));
+        setTeacherContacts(contacts);
+      } catch (e: any) {
+        console.error("fetchTeacherContacts threw:", e);
+      }
+    };
+    fetchTeacherContacts();
+  }, [children]);
 
   const loadParentName = async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -159,44 +592,66 @@ export function ParentDashboard() {
         .eq("parent_id", user.id);
 
       if (parentStudentsError) {
-        toast.error(parentStudentsError.message);
+        console.error("fetchChildren parentStudents query error:", parentStudentsError);
+        toast.error("Database error (parent_students): " + parentStudentsError.message);
+      }
+
+      const localLinksKey = `learniverse_local_parent_links_${user.id}`;
+      const localLinks = JSON.parse(localStorage.getItem(localLinksKey) || "[]");
+
+      const dbLinks = parentStudents || [];
+      const studentIdsSet = new Set([
+        ...dbLinks.map((ps: any) => ps.student_id),
+        ...localLinks.map((l: any) => l.student_id)
+      ]);
+      const studentIds = Array.from(studentIdsSet);
+
+      if (studentIds.length === 0) {
         setChildren([]);
         return;
       }
 
-      if (!parentStudents || parentStudents.length === 0) {
-        setChildren([]);
-        return;
-      }
-
-      const studentIds = parentStudents.map((ps: any) => ps.student_id);
       const parentNameByStudentId = new Map<string, string | null>();
-      (parentStudents as any[]).forEach((ps: any) => {
+      dbLinks.forEach((ps: any) => {
         if (ps?.student_id) parentNameByStudentId.set(ps.student_id, ps.parent_name ?? null);
       });
-      // Do NOT join `students -> profiles` via PostgREST here.
-      // There is no FK relationship between these tables (both reference auth.users via user_id),
-      // so a relationship join will fail with: "Could not find a relationship... in the schema cache".
+      localLinks.forEach((l: any) => {
+        if (l?.student_id && !parentNameByStudentId.has(l.student_id)) {
+          parentNameByStudentId.set(l.student_id, l.parent_name ?? null);
+        }
+      });
+
       const { data: students, error: studentsError } = await supabase
         .from("students")
         .select("*")
         .in("id", studentIds);
 
       if (studentsError) {
-        toast.error(studentsError.message);
-        setChildren([]);
-        return;
+        console.error("fetchChildren students query error:", studentsError);
+        toast.error("Database error (students): " + studentsError.message);
       }
 
-      if (!students || students.length === 0) {
-        // This typically means the link exists but parent lacks SELECT policies on students/profiles.
-        toast.error("Child linked, but the parent account cannot read student records yet. Please apply the latest RLS policies in Supabase.");
-        setChildren([]);
-        return;
+      const dbStudentIds = new Set((students || []).map((s: any) => s.id));
+      const missingStudentIds = studentIds.filter(id => !dbStudentIds.has(id));
+
+      let studentRows = students || [];
+      if (missingStudentIds.length > 0) {
+        const backfilled = localLinks
+          .filter((l: any) => missingStudentIds.includes(l.student_id))
+          .map((l: any) => ({
+            id: l.student_id,
+            user_id: null,
+            student_code: null,
+            xp_points: 0,
+            focus_score: 100,
+            grade_level: l.grade_level,
+            class_id: l.class_id
+          }));
+        studentRows = [...studentRows, ...backfilled];
       }
 
-      const studentUserIds = Array.from(new Set((students || []).map((s: any) => s.user_id).filter(Boolean))) as string[];
-      const classIds = Array.from(new Set((students || []).map((s: any) => s.class_id).filter(Boolean))) as string[];
+      const studentUserIds = Array.from(new Set(studentRows.map((s: any) => s.user_id).filter(Boolean))) as string[];
+      const classIds = Array.from(new Set(studentRows.map((s: any) => s.class_id).filter(Boolean))) as string[];
 
       const { data: achievementsRows, error: achievementsError } = await supabase
         .from("student_achievements")
@@ -259,7 +714,15 @@ export function ParentDashboard() {
       });
 
       const enrichedChildren = await Promise.all(
-        students.map(async (s: any) => {
+        studentRows.map(async (s: any) => {
+            const cachedChild = localLinks.find((l: any) => l.student_id === s.id);
+            const resolvedName = (nameByUserId.get(s.user_id) || "").trim();
+            // If the student record is accidentally linked to the parent auth user,
+            // avoid showing the parent's name as the child name.
+            const safeStudentName = s.user_id === user.id
+              ? "Child"
+              : (resolvedName || cachedChild?.name || "Child");
+
             const { data: analytics } = await supabase
               .from("student_analytics")
               .select("topics_completed, quizzes_attempted, quizzes_passed, average_score, study_time_minutes")
@@ -311,6 +774,56 @@ export function ParentDashboard() {
               .limit(1)
               .maybeSingle();
 
+            const { data: latestReportCard } = await supabase
+              .from("ai_feedback")
+              .select("id, feedback_text, category, created_at, parent_acknowledged, parent_reaction")
+              .eq("student_id", s.id)
+              .eq("category", "report_card")
+              .eq("teacher_acknowledged", true)
+              .order("created_at", { ascending: false })
+              .limit(1)
+              .maybeSingle();
+
+            let reportCard = latestReportCard;
+            if (!reportCard) {
+              const localKey = `learniverse_local_report_cards_${s.id}`;
+              const localText = localStorage.getItem(localKey);
+              if (localText) {
+                const localAckKey = `learniverse_local_report_cards_ack_${s.id}`;
+                const localReactionKey = `learniverse_local_report_cards_reaction_${s.id}`;
+                const isAck = localStorage.getItem(localAckKey) === "true";
+                const reaction = localStorage.getItem(localReactionKey);
+                reportCard = {
+                  id: `local-${s.id}`,
+                  feedback_text: localText,
+                  category: "report_card",
+                  created_at: new Date().toISOString(),
+                  parent_acknowledged: isAck,
+                  parent_reaction: reaction || null,
+                  student_name: safeStudentName
+                } as any;
+              }
+            }
+
+            const { data: assignmentsTimeline } = await supabase
+              .from("student_assignments")
+              .select("id, status, score, teacher_feedback, submitted_at, reviewed_at, assignments(title, max_score, due_date)")
+              .eq("student_id", s.id)
+              .order("id", { ascending: false })
+              .limit(8);
+
+            const formattedTimeline = (assignmentsTimeline || []).map((row: any) => ({
+              id: row.id,
+              status: row.status,
+              score: row.score,
+              teacher_feedback: row.teacher_feedback,
+              submitted_at: row.submitted_at,
+              reviewed_at: row.reviewed_at,
+              title: row.assignments?.title || "Assignment",
+              max_score: row.assignments?.max_score ?? null,
+              due_date: row.assignments?.due_date ?? null
+            }));
+
             const totals = (analytics || []).reduce(
               (acc, a) => ({
                 topics_completed: acc.topics_completed + (a.topics_completed || 0),
@@ -321,13 +834,6 @@ export function ParentDashboard() {
               }),
               { topics_completed: 0, quizzes_attempted: 0, quizzes_passed: 0, average_score: 0, study_time_minutes: 0 }
             );
-
-            const resolvedName = (nameByUserId.get(s.user_id) || "").trim();
-            // If the student record is accidentally linked to the parent auth user,
-            // avoid showing the parent's name as the child name.
-            const safeStudentName = s.user_id === user.id
-              ? "Child"
-              : (resolvedName || "Child");
 
             return {
               id: s.id,
@@ -354,12 +860,17 @@ export function ParentDashboard() {
               assignments_graded: gradedCount || 0,
               avg_assignment_percent: avgAssignmentPercent,
               latest_ai_feedback: latestFeedback?.feedback_text || null,
+              latest_report_card: reportCard || null,
+              assignments_timeline: formattedTimeline,
               achievements: achievementsByStudentId.get(s.id) || [],
             };
         })
       );
 
       setChildren(enrichedChildren);
+    } catch (err: any) {
+      console.error("fetchChildren failed:", err);
+      toast.error("Failed to load children: " + (err.message || String(err)));
     } finally {
       setIsLoading(false);
     }
@@ -397,6 +908,32 @@ export function ParentDashboard() {
       if (error) {
         toast.error(error.message);
         return;
+      }
+
+      // Query student details for local caching
+      try {
+        const { data: studentInfo } = await supabase.rpc("find_student_by_code", {
+          _student_code: code
+        });
+        if (studentInfo) {
+          const sData = Array.isArray(studentInfo) ? studentInfo[0] : studentInfo;
+          if (sData) {
+            const localLinksKey = `learniverse_local_parent_links_${user.id}`;
+            const existingLinks = JSON.parse(localStorage.getItem(localLinksKey) || "[]");
+            const newLink = {
+              student_id: sData.student_id,
+              name: sData.full_name || "Child",
+              grade_level: sData.grade_level || null,
+              class_id: sData.class_id || null,
+              parent_name: name
+            };
+            const filtered = existingLinks.filter((l: any) => l.student_id !== sData.student_id);
+            filtered.push(newLink);
+            localStorage.setItem(localLinksKey, JSON.stringify(filtered));
+          }
+        }
+      } catch (e) {
+        console.error("Local link cache failed:", e);
       }
 
       // Persist the parent-provided name on the specific link row.
@@ -595,24 +1132,102 @@ export function ParentDashboard() {
                         </div>
                       </div>
 
-                      <div className="p-4 rounded-xl bg-muted/30 border border-border min-h-[120px] flex flex-col">
-                        <div className="flex items-center justify-between gap-3">
-                          <p className="text-base font-semibold text-foreground">Latest AI feedback</p>
+                      <div className="p-3 rounded-xl bg-muted/30 border border-border flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold text-foreground mb-0.5">AI Feedback</p>
+                          <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">
+                            {summarizeFeedback(child.latest_ai_feedback) || "No AI feedback yet."}
+                          </p>
+                        </div>
+                        <Button size="sm" variant="ghost" className="shrink-0 text-xs h-7 px-2" onClick={() => (window.location.href = "/parent/ai-feedback")}>
+                          View
+                        </Button>
+                      </div>
+
+                      {child.latest_report_card && (
+                        <div className="p-4 rounded-xl bg-gradient-to-r from-amber-500/10 to-purple-500/10 border border-amber-500/20 flex items-center justify-between gap-3 mt-4">
+                          <div className="flex items-center gap-2">
+                            <Sparkles className="w-5 h-5 text-amber-400 animate-pulse" />
+                            <div>
+                              <p className="text-xs font-semibold text-foreground">New AI Report Card Available!</p>
+                              <p className="text-[10px] text-muted-foreground">
+                                {child.latest_report_card.parent_acknowledged ? "Signed & Acknowledged" : "Requires parent signature"}
+                              </p>
+                            </div>
+                          </div>
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => (window.location.href = "/parent/ai-feedback")}
+                            onClick={() => setSelectedReportCard({ card: child.latest_report_card!, childId: child.id })}
+                            className="border-amber-500/30 text-amber-400 hover:bg-amber-500/15 text-xs font-bold font-display"
                           >
-                            View
+                            Open Scroll
                           </Button>
                         </div>
-                        <p className="text-sm md:text-base text-muted-foreground mt-3 whitespace-pre-wrap line-clamp-3">
-                          {child.latest_ai_feedback || "No AI feedback yet."}
-                        </p>
-                      </div>
+                      )}
                     </CardContent>
                   </Card>
                 ))}
+
+                {/* Contact My Teacher card */}
+                {teacherContacts.length > 0 && (
+                  <Card className="bg-card border-border">
+                    <CardHeader className="pb-3">
+                      <CardTitle className="font-display text-base text-foreground flex items-center gap-2">
+                        <Mail className="w-4 h-4 text-secondary" />
+                        Contact My Teacher
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {teacherContacts.map((t, i) => {
+                        const initials = t.name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
+                        return (
+                          <div key={i} className="flex items-center gap-4 p-3 rounded-xl bg-muted/30 border border-border">
+                            {t.avatar_url ? (
+                              <img src={t.avatar_url} alt={t.name} className="w-12 h-12 rounded-full object-cover ring-2 ring-secondary/30 shrink-0" />
+                            ) : (
+                              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-secondary to-primary flex items-center justify-center ring-2 ring-secondary/30 shrink-0">
+                                <span className="font-display font-bold text-lg text-white">{initials || "T"}</span>
+                              </div>
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <p className="font-semibold text-foreground text-sm">{t.name}</p>
+                              {t.subject_specialization && (
+                                <p className="text-xs text-muted-foreground">{t.subject_specialization}</p>
+                              )}
+                              {t.school_name && (
+                                <p className="text-xs text-muted-foreground">{t.school_name}</p>
+                              )}
+                            </div>
+                            <div className="flex flex-col gap-1.5 shrink-0">
+                              {t.phone && (
+                                <a
+                                  href={`tel:${t.phone}`}
+                                  className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 transition-colors"
+                                >
+                                  <Phone className="w-3.5 h-3.5" />
+                                  {t.phone}
+                                </a>
+                              )}
+                              {t.email && (
+                                <a
+                                  href={`mailto:${t.email}`}
+                                  className="flex items-center gap-1.5 text-xs text-secondary hover:text-secondary/80 transition-colors"
+                                >
+                                  <Mail className="w-3.5 h-3.5" />
+                                  {t.email}
+                                </a>
+                              )}
+                              {!t.phone && !t.email && (
+                                <p className="text-xs text-muted-foreground italic">No contact info yet</p>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </CardContent>
+                  </Card>
+                )}
 
                 {children.length === 1 ? (
                   <Card className="bg-card border-border">
@@ -663,6 +1278,18 @@ export function ParentDashboard() {
           </div>
         )}
       </div>
+
+      <Dialog open={!!selectedReportCard} onOpenChange={(open) => !open && setSelectedReportCard(null)}>
+        <DialogContent className="max-w-4xl bg-transparent border-none shadow-none p-0 text-foreground">
+          {selectedReportCard && (
+            <CosmicReportCard
+              reportCard={selectedReportCard.card}
+              childId={selectedReportCard.childId}
+              onAcknowledge={acknowledgeReportCard}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </PortalLayout>
   );
 }
@@ -671,6 +1298,88 @@ export function ParentChildProgress() {
   const [children, setChildren] = useState<ChildData[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [recentGradesByChild, setRecentGradesByChild] = useState<Record<string, GradeSummary[]>>({});
+  const [selectedReportCard, setSelectedReportCard] = useState<{ card: FeedbackData; childId: string } | null>(null);
+
+  const acknowledgeReportCard = async (reportCardId: string, childId: string) => {
+    const signature = window.prompt("To sign and acknowledge this report card, please enter your full name as a digital signature:", "");
+    if (signature === null) return;
+    if (!signature.trim()) {
+      toast.error("Signature name cannot be empty");
+      return;
+    }
+
+    if (reportCardId.startsWith("local-")) {
+      const localAckKey = `learniverse_local_report_cards_ack_${childId}`;
+      const localReactionKey = `learniverse_local_report_cards_reaction_${childId}`;
+      localStorage.setItem(localAckKey, "true");
+      localStorage.setItem(localReactionKey, `Signed by Parent: ${signature.trim()}`);
+      toast.success("Cosmic Report Card signed and acknowledged locally (offline mode)! 🌌");
+      
+      setChildren(prev => prev.map(child => {
+        if (child.id === childId && child.latest_report_card) {
+          return {
+            ...child,
+            latest_report_card: {
+              ...child.latest_report_card,
+              parent_acknowledged: true,
+              parent_reaction: `Signed by Parent: ${signature.trim()}`
+            }
+          };
+        }
+        return child;
+      }));
+
+      setSelectedReportCard(prev => prev ? {
+        ...prev,
+        card: {
+          ...prev.card,
+          parent_acknowledged: true,
+          parent_reaction: `Signed by Parent: ${signature.trim()}`
+        }
+      } : null);
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from("ai_feedback")
+        .update({
+          parent_acknowledged: true,
+          parent_reaction: `Signed by Parent: ${signature.trim()}`
+        } as any)
+        .eq("id", reportCardId);
+
+      if (error) throw error;
+
+      toast.success("Cosmic Report Card signed and acknowledged! 🌌");
+      
+      setChildren(prev => prev.map(child => {
+        if (child.id === childId && child.latest_report_card) {
+          return {
+            ...child,
+            latest_report_card: {
+              ...child.latest_report_card,
+              parent_acknowledged: true,
+              parent_reaction: `Signed by Parent: ${signature.trim()}`
+            }
+          };
+        }
+        return child;
+      }));
+
+      setSelectedReportCard(prev => prev ? {
+        ...prev,
+        card: {
+          ...prev.card,
+          parent_acknowledged: true,
+          parent_reaction: `Signed by Parent: ${signature.trim()}`
+        }
+      } : null);
+    } catch (err: any) {
+      console.error("Failed to sign report card:", err);
+      toast.error(err.message || "Failed to sign report card");
+    }
+  };
 
   useEffect(() => {
     const fetchData = async () => {
@@ -685,28 +1394,56 @@ export function ParentChildProgress() {
           .eq("parent_id", user.id);
 
         if (parentStudentsError) {
-          toast.error(parentStudentsError.message);
-          return;
+          console.error("fetchData parentStudents query error:", parentStudentsError);
+          toast.error("Database error (parent_students): " + parentStudentsError.message);
         }
 
-        if (!parentStudents || parentStudents.length === 0) {
+        const localLinksKey = `learniverse_local_parent_links_${user.id}`;
+        const localLinks = JSON.parse(localStorage.getItem(localLinksKey) || "[]");
+
+        const dbLinks = parentStudents || [];
+        const studentIdsSet = new Set([
+          ...dbLinks.map((ps: any) => ps.student_id),
+          ...localLinks.map((l: any) => l.student_id)
+        ]);
+        const studentIds = Array.from(studentIdsSet);
+
+        if (studentIds.length === 0) {
           setChildren([]);
           return;
         }
 
-        const studentIds = parentStudents.map((ps) => ps.student_id);
         const { data: students, error: studentsError } = await supabase
           .from("students")
           .select("*")
           .in("id", studentIds);
 
         if (studentsError) {
-          toast.error(studentsError.message);
-          return;
+          console.error("fetchData students query error:", studentsError);
+          toast.error("Database error (students): " + studentsError.message);
         }
 
-        const studentUserIds = Array.from(new Set((students || []).map((s: any) => s.user_id).filter(Boolean))) as string[];
-        const classIds = Array.from(new Set((students || []).map((s: any) => s.class_id).filter(Boolean))) as string[];
+        const dbStudentIds = new Set((students || []).map((s: any) => s.id));
+        const missingStudentIds = studentIds.filter(id => !dbStudentIds.has(id));
+
+        let studentRows = students || [];
+        if (missingStudentIds.length > 0) {
+          const backfilled = localLinks
+            .filter((l: any) => missingStudentIds.includes(l.student_id))
+            .map((l: any) => ({
+              id: l.student_id,
+              user_id: null,
+              student_code: null,
+              xp_points: 0,
+              focus_score: 100,
+              grade_level: l.grade_level,
+              class_id: l.class_id
+            }));
+          studentRows = [...studentRows, ...backfilled];
+        }
+
+        const studentUserIds = Array.from(new Set(studentRows.map((s: any) => s.user_id).filter(Boolean))) as string[];
+        const classIds = Array.from(new Set(studentRows.map((s: any) => s.class_id).filter(Boolean))) as string[];
 
         const [{ data: profiles, error: profilesError }, { data: classes, error: classesError }] = await Promise.all([
           supabase.from("profiles").select("user_id, full_name, phone").in("user_id", studentUserIds),
@@ -739,7 +1476,13 @@ export function ParentChildProgress() {
         });
 
         const enrichedChildren = await Promise.all(
-          (students || []).map(async (s: any) => {
+          studentRows.map(async (s: any) => {
+            const cachedChild = localLinks.find((l: any) => l.student_id === s.id);
+            const resolvedName = (nameByUserId.get(s.user_id) || "").trim();
+            const safeStudentName = s.user_id === user.id
+              ? "Child"
+              : (resolvedName || cachedChild?.name || "Child");
+
             const { data: analytics } = await supabase
               .from("student_analytics")
               .select("topics_completed, quizzes_attempted, quizzes_passed, average_score, study_time_minutes")
@@ -791,6 +1534,56 @@ export function ParentChildProgress() {
               .limit(1)
               .maybeSingle();
 
+            const { data: latestReportCard } = await supabase
+              .from("ai_feedback")
+              .select("id, feedback_text, category, created_at, parent_acknowledged, parent_reaction")
+              .eq("student_id", s.id)
+              .eq("category", "report_card")
+              .eq("teacher_acknowledged", true)
+              .order("created_at", { ascending: false })
+              .limit(1)
+              .maybeSingle();
+
+            let reportCard = latestReportCard;
+            if (!reportCard) {
+              const localKey = `learniverse_local_report_cards_${s.id}`;
+              const localText = localStorage.getItem(localKey);
+              if (localText) {
+                const localAckKey = `learniverse_local_report_cards_ack_${s.id}`;
+                const localReactionKey = `learniverse_local_report_cards_reaction_${s.id}`;
+                const isAck = localStorage.getItem(localAckKey) === "true";
+                const reaction = localStorage.getItem(localReactionKey);
+                reportCard = {
+                  id: `local-${s.id}`,
+                  feedback_text: localText,
+                  category: "report_card",
+                  created_at: new Date().toISOString(),
+                  parent_acknowledged: isAck,
+                  parent_reaction: reaction || null,
+                  student_name: safeStudentName
+                } as any;
+              }
+            }
+
+            const { data: assignmentsTimeline } = await supabase
+              .from("student_assignments")
+              .select("id, status, score, teacher_feedback, submitted_at, reviewed_at, assignments(title, max_score, due_date)")
+              .eq("student_id", s.id)
+              .order("id", { ascending: false })
+              .limit(8);
+
+            const formattedTimeline = (assignmentsTimeline || []).map((row: any) => ({
+              id: row.id,
+              status: row.status,
+              score: row.score,
+              teacher_feedback: row.teacher_feedback,
+              submitted_at: row.submitted_at,
+              reviewed_at: row.reviewed_at,
+              title: row.assignments?.title || "Assignment",
+              max_score: row.assignments?.max_score ?? null,
+              due_date: row.assignments?.due_date ?? null
+            }));
+
             const totals = (analytics || []).reduce(
               (acc, a) => ({
                 topics_completed: acc.topics_completed + (a.topics_completed || 0),
@@ -804,11 +1597,6 @@ export function ParentChildProgress() {
 
             const childClass = s.class_id ? classById.get(s.class_id) : null;
             const teacherId = childClass?.teacher_id ?? null;
-
-            const resolvedName = (nameByUserId.get(s.user_id) || "").trim();
-            const safeStudentName = s.user_id === user.id
-              ? "Child"
-              : (resolvedName || "Child");
 
             return {
               id: s.id,
@@ -834,6 +1622,8 @@ export function ParentChildProgress() {
               assignments_graded: gradedCount || 0,
               avg_assignment_percent: avgAssignmentPercent,
               latest_ai_feedback: latestFeedback?.feedback_text || null,
+              latest_report_card: reportCard || null,
+              assignments_timeline: formattedTimeline
             } as ChildData;
           })
         );
@@ -870,6 +1660,9 @@ export function ParentChildProgress() {
           }, {});
 
           setRecentGradesByChild(grouped);
+      } catch (err: any) {
+        console.error("fetchData failed:", err);
+        toast.error("Failed to load child progress: " + (err.message || String(err)));
       } finally {
         setIsLoading(false);
       }
@@ -991,21 +1784,39 @@ export function ParentChildProgress() {
                     </div>
                   </div>
 
-                  <div className="p-4 rounded-xl bg-muted/30 border border-border min-h-[120px] flex flex-col">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-base font-semibold text-foreground">Latest AI feedback</p>
+                  <div className="p-3 rounded-xl bg-muted/30 border border-border flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-foreground mb-0.5">AI Feedback</p>
+                      <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">
+                        {summarizeFeedback(child.latest_ai_feedback) || "No AI feedback yet."}
+                      </p>
+                    </div>
+                    <Button size="sm" variant="ghost" className="shrink-0 text-xs h-7 px-2" onClick={() => (window.location.href = "/parent/ai-feedback")}>
+                      View
+                    </Button>
+                  </div>
+
+                  {child.latest_report_card && (
+                    <div className="p-4 rounded-xl bg-gradient-to-r from-amber-500/10 to-purple-500/10 border border-amber-500/20 flex items-center justify-between gap-3 mt-4">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="w-5 h-5 text-amber-400 animate-pulse" />
+                        <div>
+                          <p className="text-xs font-semibold text-foreground">New AI Report Card Available!</p>
+                          <p className="text-[10px] text-muted-foreground">
+                            {child.latest_report_card.parent_acknowledged ? "Signed & Acknowledged" : "Requires parent signature"}
+                          </p>
+                        </div>
+                      </div>
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => (window.location.href = "/parent/ai-feedback")}
+                        onClick={() => setSelectedReportCard({ card: child.latest_report_card!, childId: child.id })}
+                        className="border-amber-500/30 text-amber-400 hover:bg-amber-500/15 text-xs font-bold font-display"
                       >
-                        View
+                        Open Scroll
                       </Button>
                     </div>
-                    <p className="text-sm md:text-base text-muted-foreground mt-3 whitespace-pre-wrap line-clamp-3">
-                      {child.latest_ai_feedback || "No AI feedback yet."}
-                    </p>
-                  </div>
+                  )}
 
                   <div className="space-y-3">
                     <h4 className="font-medium text-foreground">Performance Overview</h4>
@@ -1018,39 +1829,31 @@ export function ParentChildProgress() {
                     </div>
                   </div>
 
-                  {recentGradesByChild[child.id]?.length > 0 && (
-                    <div className="space-y-3">
-                      <h4 className="font-medium text-foreground">Recent Graded Assignments</h4>
-                      <div className="space-y-2">
-                        {recentGradesByChild[child.id].map((g) => (
-                          <div key={g.id} className="p-3 rounded-lg bg-muted/50 border border-border">
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <p className="text-sm font-medium text-foreground truncate">{g.title}</p>
-                                {g.reviewed_at && (
-                                  <p className="text-xs text-muted-foreground">
-                                    {new Date(g.reviewed_at).toLocaleString()}
-                                  </p>
-                                )}
-                              </div>
-                              <p className="text-sm font-semibold text-accent whitespace-nowrap">
-                                {g.score ?? "-"}/{g.max_score ?? "-"}
-                              </p>
-                            </div>
-                            {g.teacher_feedback && (
-                              <p className="text-sm text-muted-foreground mt-2 whitespace-pre-wrap">{g.teacher_feedback}</p>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                  <div className="space-y-3">
+                    <h4 className="font-medium text-foreground flex items-center gap-2">
+                      <FileText className="w-4 h-4 text-primary" />
+                      Assignment Journey Timeline
+                    </h4>
+                    <AssignmentTimeline timeline={child.assignments_timeline || []} />
+                  </div>
                 </CardContent>
               </Card>
             ))}
           </div>
         )}
       </div>
+
+      <Dialog open={!!selectedReportCard} onOpenChange={(open) => !open && setSelectedReportCard(null)}>
+        <DialogContent className="max-w-4xl bg-transparent border-none shadow-none p-0 text-foreground">
+          {selectedReportCard && (
+            <CosmicReportCard
+              reportCard={selectedReportCard.card}
+              childId={selectedReportCard.childId}
+              onAcknowledge={acknowledgeReportCard}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </PortalLayout>
   );
 }
@@ -1414,3 +2217,310 @@ export function ParentAlerts() {
   );
 }
 
+// ─── Parent Profile ────────────────────────────────────────────────────────────
+
+interface ParentProfileData {
+  full_name: string;
+  email: string;
+  phone: string;
+  avatar_url: string;
+  relationship_to_child: string;
+  city: string;
+}
+
+function ParentAvatarDisplay({ url, name, size = 112 }: { url: string | null; name: string; size?: number }) {
+  const initials = name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
+  if (url) {
+    return (
+      <img
+        src={url}
+        alt={name}
+        style={{ width: size, height: size }}
+        className="rounded-full object-cover ring-4 ring-accent/40 shadow-[0_0_30px_rgba(34,211,238,0.3)]"
+      />
+    );
+  }
+  return (
+    <div
+      style={{ width: size, height: size }}
+      className="rounded-full bg-gradient-to-br from-accent via-secondary to-primary flex items-center justify-center ring-4 ring-accent/40 shadow-[0_0_30px_rgba(34,211,238,0.3)]"
+    >
+      <span className="font-display font-bold text-3xl text-white">{initials || "P"}</span>
+    </div>
+  );
+}
+
+export function ParentProfile() {
+  const [profile, setProfile] = useState<ParentProfileData>({
+    full_name: "",
+    email: "",
+    phone: "",
+    avatar_url: "",
+    relationship_to_child: "",
+    city: "",
+  });
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { loadProfile(); }, []);
+
+  const loadProfile = async () => {
+    setIsLoading(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("full_name, email, phone, avatar_url, relationship_to_child, city, parent_display_name")
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (error) { toast.error("Failed to load profile: " + error.message); return; }
+      if (data) {
+        setProfile({
+          full_name: (data as any).parent_display_name || (data as any).full_name || "",
+          email: (data as any).email || user.email || "",
+          phone: (data as any).phone || "",
+          avatar_url: (data as any).avatar_url || "",
+          relationship_to_child: (data as any).relationship_to_child || "",
+          city: (data as any).city || "",
+        });
+      }
+    } finally { setIsLoading(false); }
+  };
+
+  const handleAvatarClick = () => fileInputRef.current?.click();
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { toast.error("Image must be under 5 MB"); return; }
+
+    setIsUploadingAvatar(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const ext = file.name.split(".").pop() || "jpg";
+      const path = `${user.id}/avatar.${ext}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("avatars")
+        .upload(path, file, { upsert: true, contentType: file.type });
+
+      if (uploadError) {
+        if (uploadError.message?.toLowerCase().includes("bucket not found")) {
+          toast.error("Upload failed: 'avatars' bucket not found. Please execute CREATE_AVATARS_BUCKET_AND_FIELDS.sql in your Supabase SQL Editor!");
+        } else {
+          toast.error("Upload failed: " + uploadError.message);
+        }
+        return;
+      }
+
+      const { data: { publicUrl } } = supabase.storage.from("avatars").getPublicUrl(path);
+      const cacheBusted = publicUrl + "?t=" + Date.now();
+
+      await supabase.from("profiles").update({ avatar_url: cacheBusted } as any).eq("user_id", user.id);
+      setProfile((p) => ({ ...p, avatar_url: cacheBusted }));
+      toast.success("Profile photo updated! ✨");
+    } catch (err: any) {
+      toast.error(err.message || "Upload failed");
+    } finally {
+      setIsUploadingAvatar(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    setSaved(false);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { toast.error("Please sign in again."); return; }
+
+      const { error } = await supabase
+        .from("profiles")
+        .update({
+          full_name: profile.full_name.trim(),
+          parent_display_name: profile.full_name.trim(),
+          phone: profile.phone.trim(),
+          relationship_to_child: profile.relationship_to_child || null,
+          city: profile.city.trim(),
+        } as any)
+        .eq("user_id", user.id);
+
+      if (error) { toast.error("Save failed: " + error.message); return; }
+      setSaved(true);
+      toast.success("Profile saved! 🌟");
+      setTimeout(() => setSaved(false), 3000);
+    } finally { setIsSaving(false); }
+  };
+
+  const RELATIONSHIP_OPTIONS = ["Father", "Mother", "Guardian", "Other"];
+
+  if (isLoading) {
+    return (
+      <PortalLayout role="parent">
+        <div className="flex items-center justify-center py-20 text-muted-foreground">
+          <Loader2 className="w-8 h-8 animate-spin mr-3" />
+          Loading profile...
+        </div>
+      </PortalLayout>
+    );
+  }
+
+  return (
+    <PortalLayout role="parent">
+      <div className="space-y-8 max-w-3xl mx-auto">
+        <div>
+          <h1 className="font-display text-3xl font-bold text-foreground">My Profile</h1>
+          <p className="text-muted-foreground mt-1">Manage your contact info and personal details</p>
+        </div>
+
+        {/* Avatar Card */}
+        <Card className="bg-card border-border overflow-hidden">
+          <div className="h-28 bg-gradient-to-r from-accent/20 via-secondary/20 to-primary/20 relative">
+            <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(34,211,238,0.1)_0%,transparent_70%)]" />
+          </div>
+          <CardContent className="pt-0 pb-6 px-6">
+            <div className="flex flex-col sm:flex-row items-center sm:items-end gap-5 -mt-14">
+              <div className="relative group cursor-pointer" onClick={handleAvatarClick}>
+                <ParentAvatarDisplay url={profile.avatar_url || null} name={profile.full_name || "Parent"} size={112} />
+                <div className="absolute inset-0 rounded-full bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                  {isUploadingAvatar ? (
+                    <Loader2 className="w-6 h-6 text-white animate-spin" />
+                  ) : (
+                    <Camera className="w-6 h-6 text-white" />
+                  )}
+                </div>
+              </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/gif"
+                className="hidden"
+                onChange={handleFileChange}
+              />
+              <div className="text-center sm:text-left pb-2">
+                <h2 className="font-display text-xl font-bold text-foreground">
+                  {profile.full_name || "Your Name"}
+                </h2>
+                <p className="text-sm text-muted-foreground">
+                  {profile.relationship_to_child || "Parent"}{profile.city ? ` • ${profile.city}` : ""}
+                </p>
+                <button
+                  onClick={handleAvatarClick}
+                  className="mt-1 text-xs text-accent hover:text-accent/80 underline underline-offset-2 flex items-center gap-1 mx-auto sm:mx-0"
+                  disabled={isUploadingAvatar}
+                >
+                  <Pencil className="w-3 h-3" />
+                  {isUploadingAvatar ? "Uploading..." : "Change photo"}
+                </button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Fields Card */}
+        <Card className="bg-card border-border">
+          <CardHeader>
+            <CardTitle className="font-display text-lg text-foreground">Personal Details</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-5">
+
+            <div className="space-y-1.5">
+              <Label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                <User className="w-4 h-4 text-accent" />
+                Full Name
+              </Label>
+              <Input
+                value={profile.full_name}
+                onChange={(e) => setProfile((p) => ({ ...p, full_name: e.target.value }))}
+                placeholder="Enter your full name"
+                className="bg-muted border-border"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                <Mail className="w-4 h-4 text-muted-foreground" />
+                Email
+                <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground border border-border px-1.5 py-0.5 rounded ml-1">Read-only</span>
+              </Label>
+              <Input value={profile.email} disabled className="bg-muted border-border opacity-60 cursor-not-allowed" />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                <Phone className="w-4 h-4 text-accent" />
+                Phone Number
+              </Label>
+              <Input
+                value={profile.phone}
+                onChange={(e) => setProfile((p) => ({ ...p, phone: e.target.value }))}
+                placeholder="Enter your phone number"
+                className="bg-muted border-border"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                <Baby className="w-4 h-4 text-secondary" />
+                Relationship to Child
+              </Label>
+              <div className="flex flex-wrap gap-2">
+                {RELATIONSHIP_OPTIONS.map((rel) => (
+                  <button
+                    key={rel}
+                    onClick={() => setProfile((p) => ({ ...p, relationship_to_child: p.relationship_to_child === rel ? "" : rel }))}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium border transition-all duration-150 ${
+                      profile.relationship_to_child === rel
+                        ? "bg-accent/20 border-accent text-accent"
+                        : "bg-muted border-border text-muted-foreground hover:border-accent/50"
+                    }`}
+                  >
+                    {rel}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                <School className="w-4 h-4 text-primary" />
+                City / Location
+              </Label>
+              <Input
+                value={profile.city}
+                onChange={(e) => setProfile((p) => ({ ...p, city: e.target.value }))}
+                placeholder="Enter your city"
+                className="bg-muted border-border"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              {saved && (
+                <span className="flex items-center gap-1.5 text-sm text-emerald-400">
+                  <CheckCircle className="w-4 h-4" />
+                  Saved!
+                </span>
+              )}
+              <Button
+                onClick={handleSave}
+                disabled={isSaving}
+                className="bg-accent hover:bg-accent/90 text-background font-display font-semibold px-6"
+              >
+                {isSaving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                {isSaving ? "Saving..." : "Save Profile"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </PortalLayout>
+  );
+}

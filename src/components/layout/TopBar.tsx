@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Bell, Search, User, LogOut, Menu, ArrowLeft } from "lucide-react";
+import { Bell, Search, User, LogOut, ArrowLeft, Sun, Moon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -13,6 +13,8 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { BackIconButton } from "@/components/layout/BackIconButton";
+import { CELESTIAL_AVATARS } from "@/hooks/useGamification";
+import { FocusShield } from "@/components/student/FocusShield";
 
 interface TopBarProps {
   showSearch?: boolean;
@@ -24,24 +26,97 @@ export function TopBar({ showSearch = true, role }: TopBarProps) {
   const location = useLocation();
   const [searchQuery, setSearchQuery] = useState("");
   const [profile, setProfile] = useState<{ full_name: string | null; email: string | null } | null>(null);
+  const [student, setStudent] = useState<{ id: string; xp_points: number; focus_score: number } | null>(null);
   const [notificationCount, setNotificationCount] = useState(0);
+  const [avatarEmoji, setAvatarEmoji] = useState("✨");
+  const [isDark, setIsDark] = useState(() => {
+    return document.documentElement.classList.contains("dark");
+  });
+
+  const toggleTheme = () => {
+    const nextDark = !isDark;
+    if (nextDark) {
+      document.documentElement.classList.add("dark");
+      localStorage.setItem("theme", "dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+      localStorage.setItem("theme", "light");
+    }
+    setIsDark(nextDark);
+    window.dispatchEvent(new Event("theme-changed"));
+  };
 
   const isDashboard = location.pathname === `/${role}/dashboard`;
+
+  const fetchStudentAndProfile = async () => {
+    try {
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) return;
+
+      const { data: profileData } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      
+      setProfile({
+        full_name: profileData?.full_name || "Student",
+        email: profileData?.email || user.email || "",
+      });
+
+      // Fetch student stats if role is student
+      if (role === "student") {
+        const { data: studentData } = await supabase
+          .from("students")
+          .select("*")
+          .eq("user_id", user.id)
+          .maybeSingle();
+
+        if (studentData) {
+          setStudent({
+            id: studentData.id,
+            xp_points: studentData.xp_points || 0,
+            focus_score: studentData.focus_score || 100,
+          });
+
+          const avatarId = (studentData as any).selected_avatar || "cadet";
+          const match = CELESTIAL_AVATARS.find(a => a.id === avatarId);
+          if (match) setAvatarEmoji(match.emoji);
+
+          // Local storage fallback check
+          const localKey = `learniverse_gamification_${studentData.id}`;
+          const localDataRaw = localStorage.getItem(localKey);
+          if (localDataRaw) {
+            const localData = JSON.parse(localDataRaw);
+            const localAvatarId = localData.selectedAvatar;
+            const match2 = CELESTIAL_AVATARS.find(a => a.id === localAvatarId);
+            if (match2) setAvatarEmoji(match2.emoji);
+          }
+        }
+      }
+    } catch (err) {
+      console.error("TopBar error fetching profile:", err);
+    }
+  };
 
   useEffect(() => {
     let channel: ReturnType<typeof supabase.channel> | null = null;
     let intervalId: number | null = null;
+    let handleAvatarChange: ((e: any) => void) | null = null;
 
-    const fetchProfile = async () => {
+    fetchStudentAndProfile();
+
+    const { data: { subscription: authSub } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!session) {
+        navigate(`/${role}-login`);
+      } else {
+        fetchStudentAndProfile();
+      }
+    });
+
+    const setupNotifications = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
-        const { data } = await supabase
-          .from("profiles")
-          .select("full_name, email")
-          .eq("user_id", user.id)
-          .single();
-        if (data) setProfile(data);
-
         const refreshUnreadCount = async () => {
           const { count } = await supabase
             .from("notifications")
@@ -54,12 +129,10 @@ export function TopBar({ showSearch = true, role }: TopBarProps) {
 
         await refreshUnreadCount();
 
-        // Fallback polling in case Realtime isn't enabled for this table.
         intervalId = window.setInterval(() => {
           refreshUnreadCount();
         }, 15000);
 
-        // Keep unread count fresh when notifications are inserted/updated.
         channel = supabase
           .channel(`notifications-count-${user.id}`)
           .on(
@@ -72,11 +145,24 @@ export function TopBar({ showSearch = true, role }: TopBarProps) {
           .subscribe();
       }
     };
-    fetchProfile();
+
+    setupNotifications();
+
+    if (role === "student") {
+      handleAvatarChange = (e: any) => {
+        const matchEv = CELESTIAL_AVATARS.find(a => a.id === e.detail);
+        if (matchEv) setAvatarEmoji(matchEv.emoji);
+      };
+      window.addEventListener("avatar-changed", handleAvatarChange);
+    }
 
     return () => {
       if (intervalId) window.clearInterval(intervalId);
       if (channel) supabase.removeChannel(channel);
+      authSub.unsubscribe();
+      if (handleAvatarChange) {
+        window.removeEventListener("avatar-changed", handleAvatarChange);
+      }
     };
   }, []);
 
@@ -158,6 +244,30 @@ export function TopBar({ showSearch = true, role }: TopBarProps) {
         )}
 
         <div className="flex items-center gap-2">
+          {role === "student" && student && (
+            <FocusShield
+              studentId={student.id}
+              studentName={profile?.full_name || "Student"}
+              currentXP={student.xp_points}
+              currentFocusScore={student.focus_score}
+              onUpdate={fetchStudentAndProfile}
+            />
+          )}
+
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={toggleTheme}
+            className="text-muted-foreground hover:text-foreground transition-all duration-300"
+            title={isDark ? "Switch to Light Mode" : "Switch to Dark Mode"}
+          >
+            {isDark ? (
+              <Sun className="w-5 h-5 text-amber-400" />
+            ) : (
+              <Moon className="w-5 h-5 text-indigo-500" />
+            )}
+          </Button>
+
           <Button
             variant="ghost"
             size="icon"
@@ -175,7 +285,13 @@ export function TopBar({ showSearch = true, role }: TopBarProps) {
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground">
-                <User className="w-5 h-5" />
+                {role === "student" ? (
+                  <span className="text-lg w-7 h-7 flex items-center justify-center rounded-full bg-secondary/15 border border-secondary/35 shadow-[0_0_10px_rgba(20,250,220,0.15)] transition-all hover:scale-105">
+                    {avatarEmoji}
+                  </span>
+                ) : (
+                  <User className="w-5 h-5" />
+                )}
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56 bg-popover border-border">

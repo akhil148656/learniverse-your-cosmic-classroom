@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { GamificationPanel } from "@/components/student/GamificationPanel";
 
 interface ClassInfo {
   id: string;
@@ -28,6 +29,7 @@ export default function StudentDashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [isLeaving, setIsLeaving] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [studentName, setStudentName] = useState("Student");
 
   const fetchStudentData = async () => {
     setIsLoading(true);
@@ -39,6 +41,13 @@ export default function StudentDashboard() {
           navigate("/student-login");
         return;
       }
+
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("full_name")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      setStudentName(profile?.full_name || "Student");
 
       const { data: studentData, error: studentError } = await supabase
         .from("students")
@@ -193,6 +202,8 @@ export default function StudentDashboard() {
   return (
     <PortalLayout role="student">
       <div className="space-y-6">
+        <GamificationPanel />
+        
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1.8fr)_minmax(0,1fr)]">
           <div className="space-y-4">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -270,7 +281,7 @@ export default function StudentDashboard() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <Card>
+          <Card className="glass-panel hover:shadow-[0_0_25px_rgba(139,92,246,0.15)] transition-all duration-300 hover:border-primary/30 animate-fade-in">
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle className="font-display text-lg">Smart Learning Suggestions</CardTitle>
               <Zap className="w-5 h-5 text-primary" />
@@ -303,7 +314,7 @@ export default function StudentDashboard() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="glass-panel hover:shadow-[0_0_25px_rgba(20,250,220,0.15)] transition-all duration-300 hover:border-secondary/30 animate-fade-in">
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle className="font-display text-lg">Latest AI Feedback</CardTitle>
               <MessageSquare className="w-5 h-5 text-secondary" />
@@ -326,7 +337,7 @@ export default function StudentDashboard() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="glass-panel hover:shadow-[0_0_25px_rgba(236,72,153,0.15)] transition-all duration-300 hover:border-accent/30 animate-fade-in">
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle className="font-display text-lg">Pending Tasks</CardTitle>
               <FileText className="w-5 h-5 text-accent" />
@@ -361,28 +372,7 @@ export default function StudentDashboard() {
             </CardContent>
           </Card>
         </div>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="font-display text-lg">Virtual Labs</CardTitle>
-            <FlaskConical className="w-5 h-5 text-secondary" />
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {["Physics", "Chemistry", "Biology", "Geography"].map((lab) => (
-                <Button
-                  key={lab}
-                  variant="outline"
-                  className="h-24 flex flex-col gap-2"
-                  onClick={() => navigate("/student/virtual-labs")}
-                >
-                  <FlaskConical className="w-6 h-6 text-secondary" />
-                  <span className="font-display text-sm">{lab}</span>
-                </Button>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+        {/* Virtual Labs section removed to save space */}
       </div>
     </PortalLayout>
   );

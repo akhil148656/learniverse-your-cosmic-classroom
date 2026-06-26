@@ -35,8 +35,9 @@ export function StarField() {
 
     const animate = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const isDark = document.documentElement.classList.contains("dark");
 
-      stars.forEach((star) => {
+      stars.forEach((star, idx) => {
         star.opacity += star.speed;
         if (star.opacity > 1 || star.opacity < 0.2) {
           star.speed = -star.speed;
@@ -44,7 +45,17 @@ export function StarField() {
 
         ctx.beginPath();
         ctx.arc(star.x, star.y, star.radius, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(255, 255, 255, ${star.opacity})`;
+        
+        if (isDark) {
+          ctx.fillStyle = `rgba(255, 255, 255, ${star.opacity})`;
+        } else {
+          // Drifting pastel purple & teal particles in light mode
+          const color = idx % 2 === 0 
+            ? `rgba(139, 92, 246, ${star.opacity * 0.3})`  // Purple
+            : `rgba(20, 184, 166, ${star.opacity * 0.3})`; // Teal
+          ctx.fillStyle = color;
+        }
+        
         ctx.fill();
       });
 

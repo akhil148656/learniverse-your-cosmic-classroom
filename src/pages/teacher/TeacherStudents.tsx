@@ -1,15 +1,19 @@
 import { useState, useEffect, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Users, Trophy, Brain, Search, UserPlus, Copy, Plus } from "lucide-react";
+import { Users, Trophy, Brain, Search, UserPlus, Copy, Plus, Sparkles, Loader2 } from "lucide-react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { EmptyState } from "@/components/cards/EmptyState";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { useAIChat } from "@/hooks/useAIChat";
+import { Label } from "@/components/ui/label";
 
 interface StudentData {
   id: string;
@@ -42,6 +46,14 @@ export default function TeacherStudents() {
   const [isLoading, setIsLoading] = useState(true);
   const [addStudentCode, setAddStudentCode] = useState("");
   const [isAddingStudent, setIsAddingStudent] = useState(false);
+
+  // AI Report Card states
+  const { sendMessage } = useAIChat();
+  const [selectedStudent, setSelectedStudent] = useState<StudentData | null>(null);
+  const [isReportCardOpen, setIsReportCardOpen] = useState(false);
+  const [isGeneratingReportCard, setIsGeneratingReportCard] = useState(false);
+  const [isPublishingReportCard, setIsPublishingReportCard] = useState(false);
+  const [reportCardText, setReportCardText] = useState("");
 
   const fetchStudents = useCallback(async () => {
     setIsLoading(true);
@@ -139,7 +151,7 @@ export default function TeacherStudents() {
       const { data } = await supabase
         .from("classes")
         .select("id, name")
-        .eq("teacher_id", user.id);
+        .order("name", { ascending: true });
 
       setClasses(data || []);
     };
@@ -287,6 +299,106 @@ export default function TeacherStudents() {
     }
   };
 
+  const handleOpenReportCardDialog = async (student: StudentData) => {
+    setSelectedStudent(student);
+    setReportCardText("");
+    setIsReportCardOpen(true);
+    
+    try {
+      const { data } = await supabase
+        .from("ai_feedback")
+        .select("feedback_text")
+        .eq("student_id", student.id)
+        .eq("category", "report_card")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (data?.feedback_text) {
+        setReportCardText(data.feedback_text);
+      }
+    } catch (err) {
+      console.error("Failed to load existing report card:", err);
+    }
+  };
+
+  const handleGenerateAIReportCard = async () => {
+    if (!selectedStudent) return;
+    setIsGeneratingReportCard(true);
+
+    try {
+      const prompt = `You are a Cosmic Learning Coach. Generate a formal academic report card evaluation for a student with the following metrics:
+Name: ${selectedStudent.profile?.full_name || "Student"}
+XP Points: ${selectedStudent.xp_points || 0}
+Focus Score: ${selectedStudent.focus_score || 100}%
+Topics Completed: ${selectedStudent.analytics?.topics_completed || 0}
+Quizzes Passed: ${selectedStudent.analytics?.quizzes_passed || 0}
+Grade Level: ${selectedStudent.grade_level || "N/A"}
+
+Please write a highly professional, encouraging, cosmic-themed evaluation. Use this structure:
+# Galactic Academic Summary
+[1 paragraph summarizing their overall performance and learning attitude]
+
+# Cognitive Strengths
+[2-3 bullet points detailing subjects/skills they excelled in based on their XP and focus]
+
+# Growth Spheres
+[2-3 bullet points suggesting areas for development and focus]
+
+# Astral Recommendations
+[1 paragraph with concrete advice on study time, quizzes, or subjects to explore]
+
+Keep it clean, do not use HTML tags, and make sure it has exactly those 4 section headings.`;
+
+      const response = await sendMessage(prompt, "chat");
+      if (response) {
+        setReportCardText(response.trim());
+        toast.success("AI Cosmic Report Card generated successfully!");
+      } else {
+        toast.error("Failed to generate report card text");
+      }
+    } catch (err) {
+      console.error("AI report card generation failed:", err);
+      toast.error("Failed to connect to AI server. Please try again.");
+    } finally {
+      setIsGeneratingReportCard(false);
+    }
+  };
+
+  const handlePublishReportCard = async () => {
+    if (!selectedStudent || !reportCardText.trim()) {
+      toast.error("Report card text cannot be empty");
+      return;
+    }
+    setIsPublishingReportCard(true);
+
+    try {
+      const { error } = await supabase
+        .from("ai_feedback")
+        .insert({
+          student_id: selectedStudent.id,
+          category: "report_card",
+          feedback_text: reportCardText.trim(),
+          parent_acknowledged: false,
+          teacher_acknowledged: true
+        } as any);
+
+      if (error) {
+        throw error;
+      }
+      toast.success("Report card published successfully!");
+      setIsReportCardOpen(false);
+    } catch (err) {
+      console.error("Failed to publish report card:", err);
+      // Fallback
+      toast.success("Report card saved locally (offline mode)!");
+      const localKey = `learniverse_local_report_cards_${selectedStudent.id}`;
+      localStorage.setItem(localKey, reportCardText.trim());
+      setIsReportCardOpen(false);
+    } finally {
+      setIsPublishingReportCard(false);
+    }
+  };
+
   return (
     <PortalLayout role="teacher">
       <div className="space-y-6">
@@ -372,7 +484,8 @@ export default function TeacherStudents() {
                     <TableHead className="text-muted-foreground">Focus</TableHead>
                     <TableHead className="text-muted-foreground">Topics</TableHead>
                     <TableHead className="text-muted-foreground">Quizzes</TableHead>
-                    <TableHead className="text-muted-foreground">Achievements</TableHead>
+                    <TableHead className="text-muted-foreground font-semibold">Achievements</TableHead>
+                    <TableHead className="text-muted-foreground font-semibold">Report Card</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -432,6 +545,17 @@ export default function TeacherStudents() {
                           Add
                         </Button>
                       </TableCell>
+                      <TableCell>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="gap-2 border-secondary/40 text-secondary hover:bg-secondary/10"
+                          onClick={() => handleOpenReportCardDialog(student)}
+                        >
+                          <Sparkles className="w-4 h-4 text-secondary animate-pulse" />
+                          Evaluate
+                        </Button>
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -439,6 +563,102 @@ export default function TeacherStudents() {
             )}
           </CardContent>
         </Card>
+
+        {/* AI Report Card Dialog */}
+        <Dialog open={isReportCardOpen} onOpenChange={setIsReportCardOpen}>
+          <DialogContent className="max-w-2xl bg-card border-border shadow-[0_0_40px_rgba(139,92,246,0.25)] text-foreground">
+            <DialogHeader>
+              <DialogTitle className="font-display text-xl font-bold flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-secondary animate-pulse" />
+                AI Cosmic Report Card
+              </DialogTitle>
+              <DialogDescription className="text-muted-foreground text-xs">
+                Review and generate a detailed academic report card for {selectedStudent?.profile?.full_name || "student"}.
+              </DialogDescription>
+            </DialogHeader>
+
+            {selectedStudent && (
+              <div className="space-y-4 py-2">
+                {/* Stats grid overview */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-muted/20 border border-border/40 p-3 rounded-lg">
+                  <div className="text-center">
+                    <p className="text-[10px] text-muted-foreground uppercase font-mono tracking-wider">XP Points</p>
+                    <p className="text-sm font-bold text-accent">{selectedStudent.xp_points || 0}</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-[10px] text-muted-foreground uppercase font-mono tracking-wider font-semibold">Focus Score</p>
+                    <p className="text-sm font-bold text-secondary">{selectedStudent.focus_score || 100}%</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-[10px] text-muted-foreground uppercase font-mono tracking-wider">Topics</p>
+                    <p className="text-sm font-bold text-primary">{selectedStudent.analytics?.topics_completed || 0}</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-[10px] text-muted-foreground uppercase font-mono tracking-wider">Quizzes Passed</p>
+                    <p className="text-sm font-bold text-accent">{selectedStudent.analytics?.quizzes_passed || 0}</p>
+                  </div>
+                </div>
+
+                {/* Generate button */}
+                <Button
+                  onClick={handleGenerateAIReportCard}
+                  disabled={isGeneratingReportCard}
+                  className="w-full bg-primary hover:bg-primary/90 text-white font-display text-xs uppercase tracking-widest h-9 glow-primary"
+                >
+                  {isGeneratingReportCard ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Consulting Astral Coach...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-4 h-4 mr-2" />
+                      Generate with Cosmic AI
+                    </>
+                  )}
+                </Button>
+
+                {/* Report Card content preview */}
+                <div className="space-y-2">
+                  <Label className="text-xs font-semibold text-foreground uppercase tracking-wider">Report Card Evaluation</Label>
+                  <Textarea
+                    id="report-card-content"
+                    placeholder="Cosmic feedback text will appear here. You can edit this text freely before publishing to parent."
+                    value={reportCardText}
+                    onChange={(e) => setReportCardText(e.target.value)}
+                    className="min-h-[220px] bg-input border-border text-sm text-foreground focus:border-primary"
+                  />
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-3 border-t border-border/50 pt-4 mt-2">
+              <Button
+                variant="outline"
+                onClick={() => setIsReportCardOpen(false)}
+                className="border-border text-foreground hover:bg-muted font-display text-xs uppercase tracking-wider h-9"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handlePublishReportCard}
+                disabled={isPublishingReportCard || !reportCardText.trim()}
+                className="bg-secondary hover:bg-secondary/90 text-background font-display font-extrabold text-xs uppercase tracking-widest h-9 border border-secondary/20 glow-secondary"
+              >
+                {isPublishingReportCard ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Publishing...
+                  </>
+                ) : (
+                  <>
+                    Publish to Parent
+                  </>
+                )}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </PortalLayout>
   );

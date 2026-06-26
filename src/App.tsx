@@ -18,6 +18,7 @@ import StudentAssignments from "./pages/student/StudentAssignments";
 import StudentQuizzes from "./pages/student/StudentQuizzes";
 import StudentAlerts from "./pages/student/StudentAlerts";
 import StudentSettings from "./pages/student/StudentSettings";
+import StudentStudyPlanner from "./pages/student/StudentStudyPlanner";
 import TeacherClasses from "./pages/teacher/TeacherClasses";
 import TeacherStudents from "./pages/teacher/TeacherStudents";
 import TeacherAssignments from "./pages/teacher/TeacherAssignments";
@@ -25,8 +26,9 @@ import TeacherAnalytics from "./pages/teacher/TeacherAnalytics";
 import TeacherFeedback from "./pages/teacher/TeacherFeedback";
 import TeacherGrading from "./pages/teacher/TeacherGrading";
 import TeacherAlerts from "./pages/teacher/TeacherAlerts";
+import TeacherProfile from "./pages/teacher/TeacherProfile";
 import { TeacherDashboard } from "./pages/teacher/TeacherPages";
-import { ParentDashboard, ParentChildProgress, ParentAIFeedback, ParentAlerts } from "./pages/parent/ParentPages";
+import { ParentDashboard, ParentChildProgress, ParentAIFeedback, ParentAlerts, ParentProfile } from "./pages/parent/ParentPages";
 
 const queryClient = new QueryClient();
 
@@ -53,6 +55,7 @@ const App = () => (
           <Route path="/student/virtual-labs" element={<StudentVirtualLabs />} />
           <Route path="/student/discussions" element={<StudentDiscussions />} />
           <Route path="/student/ai-mentor" element={<StudentAIMentor />} />
+          <Route path="/student/planner" element={<StudentStudyPlanner />} />
           <Route path="/student/settings" element={<StudentSettings />} />
           <Route path="/student/profile" element={<StudentSettings />} />
           <Route path="/teacher/dashboard" element={<TeacherDashboard />} />
@@ -63,10 +66,12 @@ const App = () => (
           <Route path="/teacher/feedback" element={<TeacherFeedback />} />
           <Route path="/teacher/grading" element={<TeacherGrading />} />
           <Route path="/teacher/alerts" element={<TeacherAlerts />} />
+          <Route path="/teacher/profile" element={<TeacherProfile />} />
           <Route path="/parent/dashboard" element={<ParentDashboard />} />
           <Route path="/parent/child-progress" element={<ParentChildProgress />} />
           <Route path="/parent/ai-feedback" element={<ParentAIFeedback />} />
           <Route path="/parent/alerts" element={<ParentAlerts />} />
+          <Route path="/parent/profile" element={<ParentProfile />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
