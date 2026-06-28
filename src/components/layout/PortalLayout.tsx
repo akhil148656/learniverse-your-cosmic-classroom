@@ -5,6 +5,8 @@ import { AppSidebar } from "./AppSidebar";
 import { TopBar } from "./TopBar";
 import { StarField } from "@/components/ui/StarField";
 import { supabase } from "@/integrations/supabase/client";
+import { FloatingSpacePet } from "@/components/student/FloatingSpacePet";
+import { ClashInviteListener } from "@/components/student/ClashInviteListener";
 
 interface PortalLayoutProps {
   children: ReactNode;
@@ -60,6 +62,12 @@ export function PortalLayout({ children, role }: PortalLayoutProps) {
           <main className="flex-1 p-6 overflow-auto">
             {children}
           </main>
+          {role === "student" && (
+            <>
+              <FloatingSpacePet />
+              <ClashInviteListener />
+            </>
+          )}
         </div>
       </div>
     </SidebarProvider>

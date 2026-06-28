@@ -600,11 +600,27 @@ export function FocusShield({
     toast.success(`🎉 Mission Accomplished! Successfully completed a ${duration} minutes orbit! +${xpReward} XP earned.`);
 
     try {
-      // 1. Update XP
+      const { data: currentStudent } = await supabase
+        .from("students")
+        .select("cosmic_coins")
+        .eq("id", studentId)
+        .maybeSingle();
+      
+      const prevCoins = currentStudent?.cosmic_coins ?? 50;
+      const bonusCoins = 15;
+      const nextCoins = prevCoins + bonusCoins;
+
+      // 1. Update XP and Coins
       await supabase
         .from("students")
-        .update({ xp_points: nextXP } as any)
+        .update({ 
+          xp_points: nextXP,
+          cosmic_coins: nextCoins
+        } as any)
         .eq("id", studentId);
+
+      toast.success(`🪙 Focus orbit completed! +${bonusCoins} Cosmic Coins bonus awarded!`);
+      window.dispatchEvent(new CustomEvent("xp-changed", { detail: nextXP }));
 
       // 2. Update study time minutes in analytics
       const { data: analyticsRow } = await supabase

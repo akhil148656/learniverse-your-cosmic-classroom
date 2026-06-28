@@ -18,6 +18,7 @@ import {
   Baby,
   Brain,
   Calendar,
+  Sparkles,
 } from "lucide-react";
 import {
   Sidebar,
@@ -47,6 +48,7 @@ const studentNavItems: NavItem[] = [
   { title: "Quizzes", url: "/student/quizzes", icon: HelpCircle },
   { title: "Virtual Labs", url: "/student/virtual-labs", icon: FlaskConical },
   { title: "Discussions", url: "/student/discussions", icon: MessageSquare },
+  { title: "Study Buddy", url: "/student/study-buddy", icon: Sparkles },
   { title: "Profile", url: "/student/profile", icon: User },
 ];
 

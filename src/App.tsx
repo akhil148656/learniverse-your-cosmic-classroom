@@ -19,6 +19,7 @@ import StudentQuizzes from "./pages/student/StudentQuizzes";
 import StudentAlerts from "./pages/student/StudentAlerts";
 import StudentSettings from "./pages/student/StudentSettings";
 import StudentStudyPlanner from "./pages/student/StudentStudyPlanner";
+import StudentStudyBuddy from "./pages/student/StudentStudyBuddy";
 import TeacherClasses from "./pages/teacher/TeacherClasses";
 import TeacherStudents from "./pages/teacher/TeacherStudents";
 import TeacherAssignments from "./pages/teacher/TeacherAssignments";
@@ -56,6 +57,7 @@ const App = () => (
           <Route path="/student/discussions" element={<StudentDiscussions />} />
           <Route path="/student/ai-mentor" element={<StudentAIMentor />} />
           <Route path="/student/planner" element={<StudentStudyPlanner />} />
+          <Route path="/student/study-buddy" element={<StudentStudyBuddy />} />
           <Route path="/student/settings" element={<StudentSettings />} />
           <Route path="/student/profile" element={<StudentSettings />} />
           <Route path="/teacher/dashboard" element={<TeacherDashboard />} />

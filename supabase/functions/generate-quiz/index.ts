@@ -166,8 +166,17 @@ serve(async (req) => {
         .join("\n")}\n`
       : "";
 
+    const difficultyDefinitions = {
+      easy: "EASY level: Ask fundamental questions focusing on simple definitions, direct concepts, and straightforward recall. Options should be distinct and not tricky.",
+      medium: "MEDIUM level: Intermediate conceptual questions, requiring application of theories and moderate reasoning.",
+      hard: "HARD level: Advanced theoretical concepts, tricky multi-step calculations, complex scenario analysis, and plausible wrong answer choices (distractors) that require deep comprehension to differentiate."
+    };
+    const difficultyGuide = difficultyDefinitions[difficultyUsed as "easy" | "medium" | "hard"] || difficultyDefinitions.medium;
+
     const prompt = `Create a ${questionCount}-question multiple choice quiz on the topic "${topic}" for grade ${gradeLevel} students.
-  Difficulty level: ${difficultyUsed}
+  
+  DIFFICULTY LEVEL GUIDELINES (Strictly enforce this difficulty):
+  ${difficultyGuide}
 
   Generate NEW, VARIED questions each time. Do NOT reuse questions from previous runs, even if the topic is the same.
   Use this nonce only to ensure variety (do not include it in the output): ${nonce}

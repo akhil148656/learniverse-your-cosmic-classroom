@@ -11,6 +11,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { GamificationPanel } from "@/components/student/GamificationPanel";
 
+
 interface ClassInfo {
   id: string;
   name: string;
@@ -20,6 +21,7 @@ interface ClassInfo {
 
 export default function StudentDashboard() {
   const navigate = useNavigate();
+
   const [student, setStudent] = useState<any>(null);
   const [classInfo, setClassInfo] = useState<ClassInfo | null>(null);
   const [analytics, setAnalytics] = useState<any[]>([]);
@@ -206,32 +208,59 @@ export default function StudentDashboard() {
         
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1.8fr)_minmax(0,1fr)]">
           <div className="space-y-4">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <h1 className="font-display text-3xl font-bold text-foreground">Welcome back!</h1>
-                <p className="text-muted-foreground">Continue your learning journey</p>
-              </div>
-              <Button variant="outline" onClick={() => navigate("/student/settings")}>
-                Profile
-              </Button>
-            </div>
-
-            {student?.student_code ? (
-              <Card>
-                <CardContent>
-                  <div className="flex flex-col gap-2">
-                    <p className="text-sm text-muted-foreground">Your Student ID</p>
-                    <div className="flex items-center gap-3 flex-wrap">
-                      <span className="text-lg font-semibold tracking-[0.4em]">{student.student_code}</span>
-                      <Button variant="outline" size="sm" className="h-9 px-3" onClick={copyStudentCode}>
-                        {copied ? <CheckCircle className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                        <span className="ml-2 text-xs uppercase tracking-[0.2em]">{copied ? "Copied" : "Copy"}</span>
-                      </Button>
+            <Card className="bg-gradient-card border-border shadow-[0_0_25px_rgba(139,92,246,0.1)] relative overflow-hidden">
+              <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,rgba(139,92,246,0.08),transparent)]" />
+              <CardContent className="p-6 relative z-10">
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-6">
+                  {/* Left: Avatar & Info */}
+                  <div className="flex flex-col sm:flex-row items-center gap-4 text-center sm:text-left w-full">
+                    <div className="w-16 h-16 rounded-full bg-slate-950/80 border-2 border-secondary/40 flex items-center justify-center text-3xl shadow-[0_0_15px_rgba(20,250,220,0.15)] animate-float">
+                      🧑‍🚀
+                    </div>
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-center sm:justify-start gap-2">
+                        <span className="text-[9px] px-2 py-0.5 bg-secondary/10 border border-secondary/30 text-secondary rounded-full font-mono font-semibold uppercase tracking-wider">
+                          Capsule Pilot
+                        </span>
+                      </div>
+                      <h2 className="font-display text-2xl font-extrabold text-foreground">
+                        Welcome back, {studentName}!
+                      </h2>
+                      {student?.student_code ? (
+                        <p className="text-xs text-muted-foreground font-mono mt-1">
+                          LICENSE ID: <span className="text-secondary font-bold tracking-wider">{student.student_code}</span>
+                        </p>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">Continue your learning journey</p>
+                      )}
                     </div>
                   </div>
-                </CardContent>
-              </Card>
-            ) : null}
+
+                  {/* Right: Actions */}
+                  <div className="flex sm:flex-col gap-2 shrink-0 w-full sm:w-auto">
+                    {student?.student_code && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-9 px-3 justify-center text-xs font-mono font-bold w-full sm:w-auto"
+                        onClick={copyStudentCode}
+                      >
+                        {copied ? <CheckCircle className="w-4 h-4 mr-2 text-green-500" /> : <Copy className="w-4 h-4 mr-2" />}
+                        {copied ? "COPIED" : "COPY ID"}
+                      </Button>
+                    )}
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="h-9 px-3 text-xs font-display font-semibold w-full sm:w-auto text-background hover:bg-secondary/90"
+                      onClick={() => navigate("/student/settings")}
+                    >
+                      EDIT PROFILE
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
           </div>
 
           <div className="space-y-4">
@@ -270,6 +299,8 @@ export default function StudentDashboard() {
                 </CardContent>
               </Card>
             ) : null}
+
+
           </div>
         </div>
 
