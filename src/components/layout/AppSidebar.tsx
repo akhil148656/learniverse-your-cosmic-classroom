@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -6,19 +7,21 @@ import {
   HelpCircle,
   FlaskConical,
   MessageSquare,
-  Bot,
   LogOut,
   Users,
   BarChart3,
   BookOpen,
-  Bell,
-  Settings,
   User,
   Home,
   Baby,
   Brain,
   Calendar,
   Sparkles,
+  ClipboardCheck,
+  CreditCard,
+  ChevronDown,
+  Building,
+  Rocket,
 } from "lucide-react";
 import {
   Sidebar,
@@ -32,6 +35,12 @@ import {
   SidebarHeader,
   SidebarFooter,
 } from "@/components/ui/sidebar";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { supabase } from "@/integrations/supabase/client";
 
 interface NavItem {
@@ -49,10 +58,11 @@ const studentNavItems: NavItem[] = [
   { title: "Virtual Labs", url: "/student/virtual-labs", icon: FlaskConical },
   { title: "Discussions", url: "/student/discussions", icon: MessageSquare },
   { title: "Study Buddy", url: "/student/study-buddy", icon: Sparkles },
+  { title: "Timetable", url: "/student/timetable", icon: Calendar },
   { title: "Profile", url: "/student/profile", icon: User },
 ];
 
-const teacherNavItems: NavItem[] = [
+const teacherLmsNavItems: NavItem[] = [
   { title: "Dashboard", url: "/teacher/dashboard", icon: LayoutDashboard },
   { title: "Classes", url: "/teacher/classes", icon: BookOpen },
   { title: "Students", url: "/teacher/students", icon: Users },
@@ -62,26 +72,83 @@ const teacherNavItems: NavItem[] = [
   { title: "My Profile", url: "/teacher/profile", icon: User },
 ];
 
-const parentNavItems: NavItem[] = [
+const teacherErpNavItems: NavItem[] = [
+  { title: "Attendance Register", url: "/teacher/attendance", icon: ClipboardCheck },
+  { title: "Class Timetable", url: "/teacher/timetable", icon: Calendar },
+  { title: "Hub Gateway", url: "/teacher/hub", icon: Home },
+];
+
+const parentLmsNavItems: NavItem[] = [
   { title: "Dashboard", url: "/parent/dashboard", icon: LayoutDashboard },
   { title: "Child Progress", url: "/parent/child-progress", icon: Baby },
   { title: "AI Feedback", url: "/parent/ai-feedback", icon: Brain },
   { title: "My Profile", url: "/parent/profile", icon: User },
 ];
 
+const parentErpNavItems: NavItem[] = [
+  { title: "Finance & Billing", url: "/parent/billing", icon: CreditCard },
+  { title: "Hub Gateway", url: "/parent/hub", icon: Home },
+];
+
+const adminNavItems: NavItem[] = [
+  { title: "Dashboard", url: "/admin/dashboard", icon: LayoutDashboard },
+  { title: "Class Registry", url: "/admin/classes", icon: BookOpen },
+  { title: "Timetable Master", url: "/admin/timetable", icon: Calendar },
+  { title: "Billing Center", url: "/admin/billing", icon: CreditCard },
+];
+
+const superAdminNavItems: NavItem[] = [
+  { title: "Global Dashboard", url: "/super-admin/dashboard", icon: LayoutDashboard },
+  { title: "School Tenancy", url: "/super-admin/schools", icon: Building },
+  { title: "Admin Directory", url: "/super-admin/admins", icon: Users },
+];
+
 interface AppSidebarProps {
-  role: "student" | "teacher" | "parent";
+  role: "student" | "teacher" | "parent" | "admin" | "super_admin";
 }
 
 export function AppSidebar({ role }: AppSidebarProps) {
   const location = useLocation();
   const navigate = useNavigate();
 
-  const navItems = role === "student" 
-    ? studentNavItems 
-    : role === "teacher" 
-    ? teacherNavItems 
-    : parentNavItems;
+  const [portalMode, setPortalMode] = useState<"academy" | "registry">((() => {
+    if (role === "teacher") {
+      return (localStorage.getItem("teacher_portal_mode") as "academy" | "registry") || "academy";
+    }
+    if (role === "parent") {
+      return (localStorage.getItem("parent_portal_mode") as "academy" | "registry") || "academy";
+    }
+    return "academy";
+  })());
+
+  const handleModeChange = (mode: "academy" | "registry") => {
+    setPortalMode(mode);
+    if (role === "teacher") {
+      localStorage.setItem("teacher_portal_mode", mode);
+      if (mode === "academy") {
+        navigate("/teacher/dashboard");
+      } else {
+        navigate("/teacher/attendance");
+      }
+    } else if (role === "parent") {
+      localStorage.setItem("parent_portal_mode", mode);
+      if (mode === "academy") {
+        navigate("/parent/dashboard");
+      } else {
+        navigate("/parent/billing");
+      }
+    }
+  };
+
+  const navItems = role === "student"
+    ? studentNavItems
+    : role === "teacher"
+      ? (portalMode === "academy" ? teacherLmsNavItems : teacherErpNavItems)
+      : role === "parent"
+        ? (portalMode === "academy" ? parentLmsNavItems : parentErpNavItems)
+        : role === "admin"
+          ? adminNavItems
+          : superAdminNavItems;
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -93,20 +160,60 @@ export function AppSidebar({ role }: AppSidebarProps) {
   return (
     <Sidebar className="border-r border-border bg-sidebar">
       <SidebarHeader className="p-4 border-b border-border">
-        <div 
-          className="flex items-center gap-3 cursor-pointer" 
-          onClick={() => navigate("/")}
-        >
-          <div className="w-10 h-10 rounded-lg bg-gradient-cosmic flex items-center justify-center">
+        <div className="flex items-center gap-3">
+          <div 
+            className="w-10 h-10 rounded-lg bg-gradient-cosmic flex items-center justify-center cursor-pointer"
+            onClick={() => navigate("/")}
+          >
             <img
               src="/learniverse-logo.svg"
               alt="Learniverse"
               className="w-7 h-7"
             />
           </div>
-          <div>
-            <h1 className="font-display font-bold text-lg text-foreground">Learniverse</h1>
-            <p className="text-xs text-muted-foreground capitalize">{role} Portal</p>
+          <div className="flex-1 min-w-0">
+            <h1 
+              className="font-display font-bold text-lg text-foreground leading-tight cursor-pointer"
+              onClick={() => navigate("/")}
+            >
+              Learniverse
+            </h1>
+            {role === "student" ? (
+              <p className="text-xs text-muted-foreground capitalize mt-0.5">{role} Portal</p>
+            ) : (
+              <DropdownMenu>
+                <DropdownMenuTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors mt-0.5 outline-none font-medium cursor-pointer">
+                  {portalMode === "academy" ? (
+                    <>
+                      <Rocket className="w-3 h-3 text-primary animate-pulse" />
+                      <span>Academy Mode</span>
+                    </>
+                  ) : (
+                    <>
+                      <Building className="w-3 h-3 text-secondary animate-pulse" />
+                      <span>Registry (ERP)</span>
+                    </>
+                  )}
+                  <ChevronDown className="w-3 h-3" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="bg-card/95 backdrop-blur-xl border-border w-48 z-50">
+                  <DropdownMenuItem 
+                    onClick={() => handleModeChange("academy")}
+                    className={`flex items-center gap-2 cursor-pointer py-2 ${portalMode === "academy" ? "text-primary font-semibold" : ""}`}
+                  >
+                    <Rocket className="w-4 h-4 text-primary" />
+                    <span>Cosmic Academy</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem 
+                    onClick={() => handleModeChange("registry")}
+                    className={`flex items-center gap-2 cursor-pointer py-2 ${portalMode === "registry" ? "text-secondary font-semibold" : ""}`}
+                  >
+                    <Building className="w-4 h-4 text-secondary" />
+                    <span>Space Registry (ERP)</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
           </div>
         </div>
       </SidebarHeader>
@@ -124,12 +231,12 @@ export function AppSidebar({ role }: AppSidebarProps) {
                     onClick={() => navigate(item.url)}
                     className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 ${
                       isActive(item.url)
-                        ? "bg-primary/20 text-primary glow-primary"
+                        ? "bg-primary/20 text-primary glow-primary font-semibold"
                         : "text-muted-foreground hover:bg-muted hover:text-foreground"
                     }`}
                   >
                     <item.icon className="w-5 h-5" />
-                    <span className="font-medium">{item.title}</span>
+                    <span>{item.title}</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}

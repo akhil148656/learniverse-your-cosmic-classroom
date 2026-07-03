@@ -10,7 +10,7 @@ import { ClashInviteListener } from "@/components/student/ClashInviteListener";
 
 interface PortalLayoutProps {
   children: ReactNode;
-  role: "student" | "teacher" | "parent";
+  role: "student" | "teacher" | "parent" | "admin" | "super_admin";
 }
 
 export function PortalLayout({ children, role }: PortalLayoutProps) {
@@ -24,6 +24,14 @@ export function PortalLayout({ children, role }: PortalLayoutProps) {
         navigate(`/${role}-login`);
         return;
       }
+
+      const userRole = session.user?.user_metadata?.role;
+      if (userRole && userRole !== role) {
+        console.warn(`User role mismatch. Redirecting ${userRole} from ${role} portal.`);
+        navigate(`/${userRole}/dashboard`);
+        return;
+      }
+
       setIsLoading(false);
     };
 
@@ -32,6 +40,11 @@ export function PortalLayout({ children, role }: PortalLayoutProps) {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (!session) {
         navigate(`/${role}-login`);
+      } else {
+        const userRole = session.user?.user_metadata?.role;
+        if (userRole && userRole !== role) {
+          navigate(`/${userRole}/dashboard`);
+        }
       }
     });
 
@@ -52,9 +65,15 @@ export function PortalLayout({ children, role }: PortalLayoutProps) {
     );
   }
 
+  const themeClass = role === "admin"
+    ? "admin-portal-theme"
+    : role === "super_admin"
+    ? "super-admin-portal-theme"
+    : "";
+
   return (
     <SidebarProvider>
-      <div className="min-h-screen flex w-full bg-background relative">
+      <div className={`min-h-screen flex w-full bg-background relative ${themeClass}`}>
         <StarField />
         <AppSidebar role={role} />
         <div className="flex-1 flex flex-col relative z-10">

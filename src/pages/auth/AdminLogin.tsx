@@ -1,23 +1,23 @@
 import { useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { Users, Mail, ArrowRight } from "lucide-react";
+import { Building, Mail, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { StarField } from "@/components/ui/StarField";
-import { ToastAction } from "@/components/ui/toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { BackIconButton } from "@/components/layout/BackIconButton";
 
-export default function TeacherLogin() {
+export default function AdminLogin() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [isSignUp, setIsSignUp] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [wrongRole, setWrongRole] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
+  
   const [formData, setFormData] = useState({
     email: "",
     password: "",
@@ -26,29 +26,26 @@ export default function TeacherLogin() {
 
   const normalizeEmail = (email: string) => email.trim().toLowerCase();
 
-  const resendSignupConfirmation = async (email: string) => {
-    try {
-      const { error } = await supabase.auth.resend({
-        type: "signup",
-        email,
-        options: {
-          emailRedirectTo: `${window.location.origin}/teacher/dashboard`,
-        },
-      });
-
-      if (error) throw error;
-
-      toast({
-        title: "Email sent",
-        description: "Check your inbox (and spam folder) to confirm your email.",
-      });
-    } catch (error: any) {
-      toast({
-        title: "Error",
-        description: error?.message || "Failed to resend confirmation email",
-        variant: "destructive",
-      });
+  const redirectAfterAuth = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      navigate("/admin-login");
+      return;
     }
+
+    // Check if profile is linked to a school
+    const { data: profileData, error } = await supabase
+      .from("profiles")
+      .select("school_id")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (error || !profileData || !profileData.school_id) {
+      navigate("/admin/onboarding");
+      return;
+    }
+
+    navigate("/admin/dashboard");
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -56,16 +53,16 @@ export default function TeacherLogin() {
     setIsLoading(true);
 
     try {
+      const email = normalizeEmail(formData.email);
       if (isSignUp) {
-        const email = normalizeEmail(formData.email);
         const { data, error } = await supabase.auth.signUp({
           email,
           password: formData.password,
           options: {
-            emailRedirectTo: `${window.location.origin}/teacher/dashboard`,
+            emailRedirectTo: `${window.location.origin}/admin/onboarding`,
             data: {
               full_name: formData.fullName,
-              role: "teacher",
+              role: "admin",
             },
           },
         });
@@ -75,7 +72,7 @@ export default function TeacherLogin() {
         if (!data.session) {
           toast({
             title: "Check your email",
-            description: "Confirm your email, then log in to continue.",
+            description: "Confirm your email address, then log in to continue.",
           });
           setIsSignUp(false);
           return;
@@ -83,11 +80,10 @@ export default function TeacherLogin() {
 
         toast({
           title: "Account created!",
-          description: "Redirecting to dashboard...",
+          description: "Redirecting to onboarding...",
         });
-        navigate("/teacher/hub");
+        await redirectAfterAuth();
       } else {
-        const email = normalizeEmail(formData.email);
         const { error } = await supabase.auth.signInWithPassword({
           email,
           password: formData.password,
@@ -95,10 +91,10 @@ export default function TeacherLogin() {
 
         if (error) throw error;
 
-        // Role mismatch check
+        // Role validation check
         const { data: { user } } = await supabase.auth.getUser();
         const userRole = user?.user_metadata?.role;
-        if (userRole && userRole !== "teacher") {
+        if (userRole && userRole !== "admin") {
           await supabase.auth.signOut();
           setWrongRole(true);
           setTimeout(() => setWrongRole(false), 2000);
@@ -108,27 +104,15 @@ export default function TeacherLogin() {
 
         toast({
           title: "Welcome back!",
-          description: "Redirecting to dashboard...",
+          description: "Redirecting...",
         });
-        navigate("/teacher/hub");
+        await redirectAfterAuth();
       }
     } catch (error: any) {
-      const message = String(error?.message || "Something went wrong");
-      const email = normalizeEmail(formData.email);
-      const showResend =
-        !!email && (/invalid login credentials/i.test(message) || /email not confirmed/i.test(message));
       toast({
         title: "Error",
-        description:
-          /invalid login credentials/i.test(message)
-            ? "Invalid email or password. If you just signed up, confirm your email first."
-            : message,
+        description: error?.message || "Authentication failed",
         variant: "destructive",
-        action: showResend ? (
-          <ToastAction altText="Resend confirmation email" onClick={() => resendSignupConfirmation(email)}>
-            Resend email
-          </ToastAction>
-        ) : undefined,
       });
     } finally {
       setIsLoading(false);
@@ -136,7 +120,7 @@ export default function TeacherLogin() {
   };
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-6 relative">
+    <div className="min-h-screen bg-background flex items-center justify-center p-6 relative admin-portal-theme">
       <StarField />
       
       <Card ref={cardRef} className={`w-full max-w-md relative z-10 bg-card/80 backdrop-blur-xl border-border transition-all duration-300 ${wrongRole ? 'animate-shake-reject' : ''}`}>
@@ -149,19 +133,19 @@ export default function TeacherLogin() {
           
           {wrongRole && (
             <div className="bg-destructive/10 border border-destructive/30 rounded-lg px-4 py-3 text-destructive text-sm font-medium text-center animate-in fade-in slide-in-from-top-2">
-              🚫 You don't belong here, traveler! This portal is for Teachers only.
+              🚫 You don't belong here, traveler! This portal is for Administrators only.
             </div>
           )}
           
-          <div className="w-16 h-16 rounded-xl bg-secondary/20 flex items-center justify-center mx-auto">
-            <Users className="w-8 h-8 text-secondary" />
+          <div className="w-16 h-16 rounded-xl bg-primary/20 flex items-center justify-center mx-auto">
+            <Building className="w-8 h-8 text-primary" />
           </div>
           <div>
             <CardTitle className="font-display text-2xl text-foreground">
-              {isSignUp ? "Create Teacher Account" : "Teacher Login"}
+              {isSignUp ? "Register School Admin" : "School Admin Login"}
             </CardTitle>
             <CardDescription className="text-muted-foreground">
-              {isSignUp ? "Join Learniverse as an educator" : "Welcome back, educator!"}
+              {isSignUp ? "Register your campus workspace" : "Manage your school's ERP operations"}
             </CardDescription>
           </div>
         </CardHeader>
@@ -189,7 +173,7 @@ export default function TeacherLogin() {
                 <Input
                   id="email"
                   type="email"
-                  placeholder="teacher@school.edu"
+                  placeholder="admin@school.edu"
                   value={formData.email}
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                   className="pl-10 bg-input border-border"
@@ -213,7 +197,7 @@ export default function TeacherLogin() {
 
             <Button
               type="submit"
-              className="w-full bg-secondary text-secondary-foreground hover:bg-secondary/90"
+              className="w-full bg-primary text-primary-foreground hover:opacity-90"
               disabled={isLoading}
             >
               {isLoading ? "Please wait..." : isSignUp ? "Create Account" : "Login"}
@@ -225,9 +209,9 @@ export default function TeacherLogin() {
             <button
               type="button"
               onClick={() => setIsSignUp(!isSignUp)}
-              className="text-sm text-secondary hover:underline"
+              className="text-sm text-primary hover:underline"
             >
-              {isSignUp ? "Already have an account? Login" : "Don't have an account? Sign up"}
+              {isSignUp ? "Already have an admin account? Login" : "Register a new school? Sign up"}
             </button>
           </div>
         </CardContent>

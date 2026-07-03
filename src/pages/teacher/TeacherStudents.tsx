@@ -46,6 +46,11 @@ export default function TeacherStudents() {
   const [isLoading, setIsLoading] = useState(true);
   const [addStudentCode, setAddStudentCode] = useState("");
   const [isAddingStudent, setIsAddingStudent] = useState(false);
+  
+  // ERP Student Registry Select state
+  const [registryStudents, setRegistryStudents] = useState<Array<{ id: string; student_code: string; name: string }>>([]);
+  const [selectedRegistryStudentId, setSelectedRegistryStudentId] = useState("");
+  const [teacherSchoolId, setTeacherSchoolId] = useState<string | null>(null);
 
   // AI Report Card states
   const { sendMessage } = useAIChat();
@@ -143,10 +148,58 @@ export default function TeacherStudents() {
     setIsLoading(false);
   }, [classes, selectedClass]);
 
+  const fetchRegistryStudents = useCallback(async (schoolId: string) => {
+    try {
+      const { data: studentsData, error: studentError } = await supabase
+        .from("students")
+        .select("id, student_code, user_id")
+        .eq("school_id", schoolId)
+        .is("class_id", null);
+
+      if (studentError) throw studentError;
+
+      if (!studentsData || studentsData.length === 0) {
+        setRegistryStudents([]);
+        return;
+      }
+
+      const userIds = studentsData.map((s) => s.user_id);
+      const { data: profilesData } = await supabase
+        .from("profiles")
+        .select("user_id, full_name")
+        .in("user_id", userIds);
+
+      const profilesMap = new Map((profilesData || []).map((p) => [p.user_id, p.full_name]));
+
+      const enriched = studentsData.map((s) => ({
+        id: s.id,
+        student_code: s.student_code,
+        name: profilesMap.get(s.user_id) || "Student",
+      }));
+      setRegistryStudents(enriched);
+      if (enriched.length > 0) {
+        setSelectedRegistryStudentId(enriched[0].id);
+      }
+    } catch (err) {
+      console.error("Error fetching registry:", err);
+    }
+  }, []);
+
   useEffect(() => {
     const fetchClasses = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
+
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("id, school_id")
+        .eq("user_id", user.id)
+        .single();
+
+      if (profile?.school_id) {
+        setTeacherSchoolId(profile.school_id);
+        fetchRegistryStudents(profile.school_id);
+      }
 
       const { data } = await supabase
         .from("classes")
@@ -157,7 +210,7 @@ export default function TeacherStudents() {
     };
 
     fetchClasses();
-  }, []);
+  }, [fetchRegistryStudents]);
 
   useEffect(() => {
     if (classes.length > 0 || selectedClass === "all") {
@@ -221,41 +274,42 @@ export default function TeacherStudents() {
       toast.success("Student added to class");
       setAddStudentCode("");
 
-      // Refresh list
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      const { data: studentsData } = await supabase
-        .from("students")
-        .select("*")
-        .eq("class_id", selectedClass);
-      if (studentsData) {
-        const enrichedStudents = await Promise.all(
-          studentsData.map(async (student) => {
-            const { data: profile } = await supabase
-              .from("profiles")
-              .select("full_name, email")
-              .eq("user_id", student.user_id)
-              .single();
-
-            const { data: analytics } = await supabase
-              .from("student_analytics")
-              .select("topics_completed, quizzes_passed")
-              .eq("student_id", student.id)
-              .single();
-
-            return {
-              ...student,
-              profile: profile || { full_name: null, email: null },
-              analytics: analytics || { topics_completed: 0, quizzes_passed: 0 },
-            };
-          })
-        );
-        setStudents(enrichedStudents);
+      await fetchStudents();
+      if (teacherSchoolId) {
+        fetchRegistryStudents(teacherSchoolId);
       }
+    } catch (error: any) {
+      console.error(error);
     } finally {
       setIsAddingStudent(false);
     }
   };
+
+  const enrollRegistryStudent = async () => {
+    if (selectedClass === "all" || !selectedRegistryStudentId) return;
+    setIsAddingStudent(true);
+
+    try {
+      const { error } = await supabase
+        .from("students")
+        .update({ class_id: selectedClass })
+        .eq("id", selectedRegistryStudentId);
+
+      if (error) throw error;
+
+      toast.success("Student enrolled from school registry!");
+      setSelectedRegistryStudentId("");
+      fetchStudents();
+      if (teacherSchoolId) {
+        fetchRegistryStudents(teacherSchoolId);
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Failed to enroll student");
+    } finally {
+      setIsAddingStudent(false);
+    }
+  };
+
 
   const addAchievement = async (studentId: string, studentName: string) => {
     const title = window.prompt(`Add an achievement for ${studentName}:`, "")?.trim();
@@ -431,29 +485,74 @@ Keep it clean, do not use HTML tags, and make sure it has exactly those 4 sectio
         </div>
 
         {selectedClass !== "all" && (
-          <Card className="bg-card border-border">
-            <CardHeader className="pb-3">
-              <CardTitle className="font-display text-lg flex items-center gap-2">
-                <UserPlus className="w-5 h-5 text-primary" />
-                Add Student to Class
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="flex gap-3 flex-wrap">
-              <Input
-                placeholder="Enter Student ID (e.g., STU-XXXXXXXXXX)"
-                value={addStudentCode}
-                onChange={(e) => setAddStudentCode(e.target.value)}
-                className="bg-muted border-border flex-1 min-w-[240px]"
-              />
-              <Button
-                onClick={addStudentToSelectedClass}
-                disabled={isAddingStudent}
-                className="bg-primary hover:bg-primary/90"
-              >
-                {isAddingStudent ? "Adding..." : "Add"}
-              </Button>
-            </CardContent>
-          </Card>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <Card className="bg-card border-border">
+              <CardHeader className="pb-3">
+                <CardTitle className="font-display text-lg flex items-center gap-2">
+                  <UserPlus className="w-5 h-5 text-primary" />
+                  Invite Student by Code
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="flex gap-3 flex-wrap">
+                <Input
+                  placeholder="Enter Student ID (e.g., STU-XXXXXXXXXX)"
+                  value={addStudentCode}
+                  onChange={(e) => setAddStudentCode(e.target.value)}
+                  className="bg-muted border-border flex-1 min-w-[240px]"
+                />
+                <Button
+                  onClick={addStudentToSelectedClass}
+                  disabled={isAddingStudent}
+                  className="bg-primary hover:bg-primary/90"
+                >
+                  {isAddingStudent ? "Adding..." : "Add"}
+                </Button>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-card border-border">
+              <CardHeader className="pb-3">
+                <CardTitle className="font-display text-lg flex items-center gap-2">
+                  <Users className="w-5 h-5 text-primary" />
+                  Enroll from School Registry
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="flex gap-3 flex-wrap">
+                {registryStudents.length === 0 ? (
+                  <p className="text-xs text-muted-foreground py-2 italic">
+                    No unregistered students currently in your school ledger.
+                  </p>
+                ) : (
+                  <>
+                    <div className="flex-1 min-w-[240px]">
+                      <Select
+                        value={selectedRegistryStudentId}
+                        onValueChange={setSelectedRegistryStudentId}
+                      >
+                        <SelectTrigger className="bg-muted border-border w-full">
+                          <SelectValue placeholder="Select student" />
+                        </SelectTrigger>
+                        <SelectContent className="bg-card border-border">
+                          {registryStudents.map((s) => (
+                            <SelectItem key={s.id} value={s.id}>
+                              {s.name} ({s.student_code})
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <Button
+                      onClick={enrollRegistryStudent}
+                      disabled={isAddingStudent || !selectedRegistryStudentId}
+                      className="bg-secondary hover:opacity-90 text-secondary-foreground"
+                    >
+                      {isAddingStudent ? "Enrolling..." : "Enroll"}
+                    </Button>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          </div>
         )}
 
         <Card className="bg-card border-border">

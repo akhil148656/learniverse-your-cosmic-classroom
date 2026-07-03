@@ -18,7 +18,7 @@ import { FocusShield } from "@/components/student/FocusShield";
 
 interface TopBarProps {
   showSearch?: boolean;
-  role: "student" | "teacher" | "parent";
+  role: "student" | "teacher" | "parent" | "admin" | "super_admin";
 }
 
 export function TopBar({ showSearch = true, role }: TopBarProps) {

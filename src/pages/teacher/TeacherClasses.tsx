@@ -33,6 +33,13 @@ export default function TeacherClasses() {
   const [addStudentCode, setAddStudentCode] = useState("");
   const [isAddingStudent, setIsAddingStudent] = useState(false);
 
+  // Co-teacher state variables
+  const [addCoTeacherForClassId, setAddCoTeacherForClassId] = useState<string | null>(null);
+  const [schoolTeachers, setSchoolTeachers] = useState<Array<{ user_id: string; name: string }>>([]);
+  const [selectedCoTeacherId, setSelectedCoTeacherId] = useState("");
+  const [teacherSchoolId, setTeacherSchoolId] = useState<string | null>(null);
+  const [isAddingCoTeacher, setIsAddingCoTeacher] = useState(false);
+
   const fetchClasses = async () => {
     setIsLoading(true);
 
@@ -42,6 +49,31 @@ export default function TeacherClasses() {
       toast.error(userError?.message || "Not logged in");
       setIsLoading(false);
       return;
+    }
+
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("school_id")
+      .eq("user_id", user.id)
+      .single();
+
+    if (profile?.school_id) {
+      setTeacherSchoolId(profile.school_id);
+      
+      // Fetch other teachers under the same school
+      const { data: otherTeachers } = await supabase
+        .from("profiles")
+        .select("user_id, full_name")
+        .eq("school_id", profile.school_id)
+        .eq("role", "teacher")
+        .neq("user_id", user.id);
+
+      setSchoolTeachers(
+        (otherTeachers || []).map((t) => ({
+          user_id: t.user_id,
+          name: t.full_name || "Teacher",
+        }))
+      );
     }
 
     const { data, error } = await supabase
@@ -201,6 +233,31 @@ export default function TeacherClasses() {
     }
   };
 
+  const addCoTeacherToClass = async () => {
+    if (!addCoTeacherForClassId || !selectedCoTeacherId) return;
+    setIsAddingCoTeacher(true);
+
+    try {
+      const { error } = await supabase
+        .from("class_teachers")
+        .insert({
+          class_id: addCoTeacherForClassId,
+          teacher_id: selectedCoTeacherId,
+        });
+
+      if (error) throw error;
+
+      toast.success("Co-teacher assigned successfully!");
+      setAddCoTeacherForClassId(null);
+      setSelectedCoTeacherId("");
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err.message || "Failed to add co-teacher");
+    } finally {
+      setIsAddingCoTeacher(false);
+    }
+  };
+
   return (
     <PortalLayout role="teacher">
       <div className="space-y-6">
@@ -302,6 +359,57 @@ export default function TeacherClasses() {
           </DialogContent>
         </Dialog>
 
+        <Dialog open={!!addCoTeacherForClassId} onOpenChange={(open) => { if (!open) setAddCoTeacherForClassId(null); }}>
+          <DialogContent className="bg-card border-border">
+            <DialogHeader>
+              <DialogTitle className="font-display flex items-center gap-2">
+                <UserPlus className="w-5 h-5 text-primary" />
+                Assign Co-Teacher
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3 mt-2">
+              <Label htmlFor="co-teacher-select">Select Co-Teacher</Label>
+              {schoolTeachers.length === 0 ? (
+                <p className="text-xs text-muted-foreground italic py-1">
+                  No other teachers registered in your school registry.
+                </p>
+              ) : (
+                <Select
+                  value={selectedCoTeacherId}
+                  onValueChange={setSelectedCoTeacherId}
+                >
+                  <SelectTrigger className="bg-muted border-border w-full">
+                    <SelectValue placeholder="Choose Teacher" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-card border-border">
+                    {schoolTeachers.map((t) => (
+                      <SelectItem key={t.user_id} value={t.user_id}>
+                        {t.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              <div className="flex gap-2 justify-end pt-2">
+                <Button
+                  variant="outline"
+                  onClick={() => setAddCoTeacherForClassId(null)}
+                  disabled={isAddingCoTeacher}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  className="bg-primary hover:bg-primary/90"
+                  onClick={addCoTeacherToClass}
+                  disabled={isAddingCoTeacher || !selectedCoTeacherId}
+                >
+                  {isAddingCoTeacher ? "Assigning..." : "Assign"}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
         {isLoading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {[1, 2, 3].map((i) => (
@@ -362,6 +470,18 @@ export default function TeacherClasses() {
                     >
                       <UserPlus className="w-4 h-4" />
                       Add student by ID
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-2"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setAddCoTeacherForClassId(cls.id);
+                      }}
+                    >
+                      <UserPlus className="w-4 h-4" />
+                      Add Co-Teacher
                     </Button>
                     <Button
                       variant="secondary"

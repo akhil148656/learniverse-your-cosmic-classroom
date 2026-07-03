@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Baby, Mail, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,8 @@ export default function ParentLogin() {
   const { toast } = useToast();
   const [isSignUp, setIsSignUp] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [wrongRole, setWrongRole] = useState(false);
+  const cardRef = useRef<HTMLDivElement>(null);
   const [formData, setFormData] = useState({
     email: "",
     password: "",
@@ -83,7 +85,7 @@ export default function ParentLogin() {
           title: "Account created!",
           description: "Redirecting to dashboard...",
         });
-        navigate("/parent/dashboard");
+        navigate("/parent/hub");
       } else {
         const email = normalizeEmail(formData.email);
         const { error } = await supabase.auth.signInWithPassword({
@@ -93,11 +95,22 @@ export default function ParentLogin() {
 
         if (error) throw error;
 
+        // Role mismatch check
+        const { data: { user } } = await supabase.auth.getUser();
+        const userRole = user?.user_metadata?.role;
+        if (userRole && userRole !== "parent") {
+          await supabase.auth.signOut();
+          setWrongRole(true);
+          setTimeout(() => setWrongRole(false), 2000);
+          setIsLoading(false);
+          return;
+        }
+
         toast({
           title: "Welcome back!",
           description: "Redirecting to dashboard...",
         });
-        navigate("/parent/dashboard");
+        navigate("/parent/hub");
       }
     } catch (error: any) {
       const message = String(error?.message || "Something went wrong");
@@ -126,13 +139,19 @@ export default function ParentLogin() {
     <div className="min-h-screen bg-background flex items-center justify-center p-6 relative">
       <StarField />
       
-      <Card className="w-full max-w-md relative z-10 bg-card/80 backdrop-blur-xl border-border">
+      <Card ref={cardRef} className={`w-full max-w-md relative z-10 bg-card/80 backdrop-blur-xl border-border transition-all duration-300 ${wrongRole ? 'animate-shake-reject' : ''}`}>
         <CardHeader className="text-center space-y-4">
           <BackIconButton
             fallbackHref="/"
             preferFallback
             className="absolute left-4 top-4 text-muted-foreground hover:text-foreground"
           />
+          
+          {wrongRole && (
+            <div className="bg-destructive/10 border border-destructive/30 rounded-lg px-4 py-3 text-destructive text-sm font-medium text-center animate-in fade-in slide-in-from-top-2">
+              🚫 You don't belong here, traveler! This portal is for Parents only.
+            </div>
+          )}
           
           <div className="w-16 h-16 rounded-xl bg-accent/20 flex items-center justify-center mx-auto">
             <Baby className="w-8 h-8 text-accent" />
